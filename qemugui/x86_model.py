@@ -1,47 +1,36 @@
-"""The PowerMac7,3 (G5) machine record: dataclasses, JSON load/save, checks.
+"""The Intel Mac machine record: dataclasses, JSON load/save, checks.
 
-``machine.json`` schema 1 of the G5 family. The machine is QEMU's ``mac99``
-with a 970FX CPU (the U3 memory controller, K2 I/O), started with its own
-OpenBIOS (``-bios openbios-qemu.elf``).
+``machine.json`` schema 1 of the x86 family. The machine is QEMU's ``q35``
+with OVMF and OpenCore, started as a Mac Pro, for Mac OS X 10.5 (32-bit
+kernel).
 
-Facts the record encodes (qemu ``G5-openbios``, ``hw/ppc/mac_newworld.c``):
+Facts the record encodes:
 
-* Drives. The K2 ATA-100 has two positions and holds the optical drives;
-  the K2 SATA has two ports (buses ``sata.0``/``sata.1``) for hard disks.
-  A legacy ``-drive ...,index=N`` goes to the ATA-100 when N is 0 or the
-  drive is a CD, every other hard disk to SATA; the ATA-100 fills master
-  then slave in index order. A hard disk on the ATA-100 master is emitted
-  as index 0, CDs as index 2 (see ``ata_index``), so nothing lands on SATA
-  unasked; SATA disks are attached by name (``-device ide-hd,bus=sata.N``).
-  With index 2 left empty QEMU adds an empty CD drive there.
-* Boot. OpenBIOS probes ATA-100 master, slave, then SATA A, B, and names
-  the first hard disk ``hd`` and the first CD ``cd``; ``-boot c`` picks
-  ``hd``, ``-boot d`` picks ``cd``, as long as the NVRAM's boot-device is
-  still the default.
-* NVRAM. QEMU keeps it in ``nvram.img`` (16 KB) in its working directory,
-  the machine folder, creating it when absent; a file of another size is
-  not used. ``-prom-env`` values are set in it at every start, over what it
-  holds; a variable not given keeps its saved value. There is no PRAM file.
-* Sound. The K2's I2S sound takes ``-global macio-newworld.audiodev=``;
-  ``usb-audio`` needs a backend of its own.
-* Graphics. With no card chosen the machine's own std VGA runs. The ATI
-  cards sit in the AGP slot (``bus=pci.0,addr=0x10``) and need their
-  Open Firmware ROM (``romfile``).
-* Input. The machine always has a USB keyboard and mouse.
-* Host USB devices. Passed through with QEMU's ``usb-host``, which needs
-  QEMU to run as root (the launcher uses sudo, as for vmnet): high- and
-  super-speed devices on the EHCI (``usb-bus.2``, high speed only), others
-  on the empty second OHCI (``usb-bus.1``), by the speed saved with the
-  device. macOS, and Windows, where QEMU runs unelevated and opens only a
-  device that is on Windows' WinUSB driver (``winusb-switch.exe`` moves it
-  there and back).
+* Drives. The boot disk (the generated OpenCore ``esp.img``) is on SATA
+  port 0 and is not part of the record; the record's five drives are the
+  ports 1 to 5 of the ICH9 AHCI controller (``ide.1`` to ``ide.5``).
+* Firmware. OVMF code is read-only from ``pc-bios``; the variable store is
+  the machine's own ``OVMF_VARS.fd``, which holds the NVRAM (startup disk,
+  OpenCore variables) and is never overwritten once it exists.
+* SMC key. The ``isa-applesmc`` device needs a 64-character key. It is read
+  by the launcher from a file when the launcher runs and is kept in no
+  record, setting or launcher.
+* Acceleration. TCG everywhere; HVF on an Intel Mac, WHPX on Windows.
+* Input. A USB keyboard and a tablet (or mouse) on the UHCI controller.
+* Host USB devices. Passed through with QEMU's ``usb-host``: full- and
+  low-speed devices on the UHCI, high-speed ones on an added EHCI. macOS
+  needs QEMU to run as root (the launcher uses sudo, as for vmnet); on
+  Windows QEMU runs unelevated and opens only a device that is on Windows'
+  WinUSB driver (``winusb-switch.exe`` moves it there and back).
 """
 
 from __future__ import annotations
 
 import json
+import platform as _platform
 import re
 import shutil
+import uuid as _uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
@@ -51,10 +40,10 @@ from .paths import (DISPLAYS, default_display, AUDIO_DEFAULT,
                     NETWORK_MODES, NETWORK_MODE_PLATFORM, NETWORK_MODES_WITH_IFNAME,
                     NETWORK_MODE_LABELS, network_mode_label, network_mode_by_label,
                     network_modes_for_host, network_labels_for_host, default_ifname,
-                    ifname_label, default_audio_label, FORMATS, DRIVE_FORMATS, detect_format,
+                    ifname_label, FORMATS, DRIVE_FORMATS, detect_format,
                     is_host_drive)
 
-DEFAULT_MAC = "00:05:02:12:34:56"
+DEFAULT_MAC = "52:54:00:12:34:56"
 
 SCHEMA = 1
 NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
@@ -63,15 +52,16 @@ VNC_RE = re.compile(r"^([A-Za-z0-9.\-]*:)?\d+$")
 RTC_BASE_RE = re.compile(r"^(utc|localtime|\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?)$")
 RTC_BASE_CHOICES = ("", "localtime")
 
-MACHINE_TYPE = "mac99,via=pmu"
-CPU_TYPE = "970fx"
-FIRMWARE_FILE = "openbios-qemu.elf"
+MAC_MODELS = ("MacPro1,1", "MacPro2,1", "MacPro3,1")
+MAC_MODEL_DEFAULT = "MacPro2,1"
+OS_VERSIONS = ("10.5",)
+OS_DEFAULT = "10.5"
+# the OpenCore Kernel->Scheme->KernelArch of each system
+OS_KERNEL_ARCH = {"10.5": "i386"}
 
-# Drive positions, in OpenBIOS probe order.
-DRIVE_SLOTS = ("ATA-100 master", "ATA-100 slave", "SATA port A", "SATA port B")
-ATA_MASTER, ATA_SLAVE, SATA_A, SATA_B = range(4)
-ATA_SLOTS = (ATA_MASTER, ATA_SLAVE)
-SATA_SLOTS = (SATA_A, SATA_B)
+# SATA ports 1 to 5; port 0 is the generated OpenCore boot disk
+DRIVE_SLOTS = tuple(f"SATA port {n}" for n in range(1, 6))
+SATA_FIRST_PORT = 1
 
 DRIVE_KINDS = ("disk", "cdrom")
 
@@ -80,39 +70,14 @@ def slot_name(i: int) -> str:
     return DRIVE_SLOTS[i]
 
 
-def is_sata(i: int) -> bool:
-    return i in SATA_SLOTS
-
-
 def slot_kinds(i: int) -> tuple[str, ...]:
-    """What a position can hold: SATA hard disks only, the ATA-100 slave a
-    CD only (a hard disk there would be sent to SATA)."""
-    if is_sata(i):
-        return ("disk",)
-    if i == ATA_SLAVE:
-        return ("cdrom",)
+    """Every SATA port takes a hard disk or a CD."""
     return DRIVE_KINDS
 
 
-def ata_index(m: Machine, i: int) -> int:
-    """The legacy -drive index for ATA-100 position *i*. Index 2 is the only
-    one besides 0 that stays on the ATA-100 for a CD, and using it for a
-    lone CD keeps QEMU from adding an empty one."""
-    if i == ATA_MASTER:
-        master = m.drives[ATA_MASTER]
-        slave = m.drives[ATA_SLAVE]
-        if master and master.kind == "cdrom" and not (slave and slave.file):
-            return 2
-        return 0
-    return 2
-
-
-def resolved_boot_kind(m: Machine) -> str:
-    """'cdrom' if ``boot_slot`` names a filled CD position, else 'disk'."""
-    i = m.boot_slot
-    if i is not None and 0 <= i < len(m.drives) and m.drives[i] and m.drives[i].file:
-        return m.drives[i].kind if m.drives[i].kind in DRIVE_KINDS else "disk"
-    return "disk"
+def sata_port(i: int) -> int:
+    """The AHCI port (``ide.N``) of drive position *i*."""
+    return SATA_FIRST_PORT + i
 
 
 def host_drives(m: Machine) -> list[str]:
@@ -121,33 +86,92 @@ def host_drives(m: Machine) -> list[str]:
             if d and d.kind == "cdrom" and is_host_drive(d.file)]
 
 
-def lowest_slot_of_kind(m: Machine, kind: str) -> int | None:
-    """The position OpenBIOS names for *kind*: the first filled one."""
-    for i, d in enumerate(m.drives):
-        if d and d.file and d.kind == kind:
-            return i
+SMP_CHOICES = (1, 2, 4, 8)
+
+
+def smp_option(n: int) -> str:
+    """Two sockets above one CPU, as in a Mac Pro."""
+    n = int(n)
+    if n < 2 or n % 2:
+        return str(n)
+    return f"{n},sockets=2,cores={n // 2},threads=1"
+
+SMP_DEFAULT = 1
+RAM_CHOICES = (1024, 2048, 3072, 4096)
+RAM_DEFAULT = 2048
+
+ACCEL_DEFAULT = "tcg"
+RESOLUTIONS = ("1024x768", "1280x800", "1440x900", "1680x1050", "1920x1200")
+RESOLUTION_DEFAULT = "1440x900"
+
+# the variable store, QEMU's to write: a sudo run gives it back to the user
+VARS_FILE = paths.OVMF_VARS_NAME
+ESP_DIR = "esp"
+ESP_IMAGE = "esp.img"
+SERIAL_LOG = "serial.log"
+SAVED_SETTINGS_FILES = (VARS_FILE,)
+
+OWNED_FILES = ("machine.json", "run.command", "run.bat", "last-run.log", ESP_IMAGE, SERIAL_LOG,
+               VARS_FILE, ".DS_Store")
+OWNED_DIRS = (ESP_DIR,)
+
+SMC_KEY_LENGTH = 64
+
+
+def accel_choices(platform: str = paths.HOST_PLATFORM, arch: str | None = None) -> tuple[str, ...]:
+    """The accelerators the host offers: HVF only on an Intel Mac, WHPX only
+    on Windows."""
+    arch = (arch or _platform.machine()).lower()
+    if platform == "darwin":
+        return ("tcg", "hvf") if arch in ("x86_64", "amd64") else ("tcg",)
+    if paths.is_windows(platform):
+        return ("tcg", "whpx")
+    return ("tcg",)
+
+
+def accel_label(accel: str) -> str:
+    return {"tcg": "tcg (software)", "hvf": "hvf (macOS hypervisor)",
+            "whpx": "whpx (Windows hypervisor)"}.get(accel, accel)
+
+
+def accel_by_label(label: str) -> str:
+    for a in ("tcg", "hvf", "whpx"):
+        if accel_label(a) == label:
+            return a
+    return label
+
+
+def accel_labels_for_host(platform: str = paths.HOST_PLATFORM, current: str | None = None,
+                          arch: str | None = None) -> list[str]:
+    """The choices offered, plus whatever the record holds."""
+    out = list(accel_choices(platform, arch))
+    if current and current not in out:
+        out.append(current)
+    return [accel_label(a) for a in out]
+
+
+def smc_key_problem(path: str | Path) -> str | None:
+    """A plain reason the SMC key file cannot be used, or None. The key is
+    read to count it and is not kept or returned."""
+    if not str(path or "").strip():
+        return "No SMC key file is chosen."
+    p = Path(str(path)).expanduser()
+    try:
+        text = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return f"The SMC key file {p} is not there."
+    except (OSError, UnicodeError):
+        return f"The SMC key file {p} cannot be read."
+    key = text[:-1] if text.endswith("\n") else text
+    if key.endswith("\r"):
+        key = key[:-1]
+    if len(key) != SMC_KEY_LENGTH or not key.isprintable():
+        return (f"The SMC key file {p.name} has to hold one line of exactly "
+                f"{SMC_KEY_LENGTH} printable characters.")
+    if '"' in key:
+        return f"The SMC key file {p.name} holds a double quote, which a launcher cannot pass on."
     return None
 
-
-AUDIO_MODES = ("default", "sdl", "none")
-RAM_CHOICES = (1024, 2048, 3072, 4096, 6144, 8192, 16384)
-RAM_MIN, RAM_MAX = 256, 16384
-RAM_DEFAULT = 2048
-SMP_MIN, SMP_MAX = 1, 16  # Mac OS X 10.5 deadlocks above ~16 CPUs
-DECR_CAP_MS = 100  # timer kick interval when the setting is on
-
-GPU_MODELS = ("radeon9800", "rv100")
-GPU_LABELS = {"radeon9800": "ATI Radeon 9800", "rv100": "ATI Radeon 7000 (RV100)"}
-GL_MODES = ("off", "on", "fast")
-ASYNC_MODES = ("auto", "on", "off")
-RASTER_MIN, RASTER_MAX = 0, 8          # 0 = automatic, 1 = one thread
-ROM_SUFFIXES = (".rom",)
-
-NVRAM_FILE = "nvram.img"
-SAVED_SETTINGS_FILES = (NVRAM_FILE,)
-
-OWNED_FILES = ("machine.json", "run.command", "run.bat", "last-run.log",
-               NVRAM_FILE, ".DS_Store")
 
 IMAGE_SUFFIXES = {".img", ".dsk", ".qcow2", ".iso", ".toast", ".cdr", ".dmg",
                   ".hfv", ".hfs", ".vmdk", ".raw"}
@@ -155,30 +179,6 @@ IMAGE_SUFFIXES = {".img", ".dsk", ".qcow2", ".iso", ".toast", ".cdr", ".dmg",
 
 def looks_like_disk_image(name: str) -> bool:
     return Path(name).suffix.lower() in IMAGE_SUFFIXES
-
-
-def roms_in(folder: str | Path | None) -> list[str]:
-    """The ROM files lying in *folder*, by name."""
-    if not folder:
-        return []
-    try:
-        entries = list(Path(folder).iterdir())
-    except OSError:
-        return []
-    return sorted((p.name for p in entries
-                   if p.is_file() and p.suffix.lower() in ROM_SUFFIXES), key=str.lower)
-
-
-def bios_in(folder: str | Path | None) -> list[str]:
-    """The firmware candidates lying in *folder*: ``*.elf`` and ``openbios*``."""
-    if not folder:
-        return []
-    try:
-        entries = list(Path(folder).iterdir())
-    except OSError:
-        return []
-    return sorted((p.name for p in entries if p.is_file() and (
-        p.suffix.lower() == ".elf" or p.name.lower().startswith("openbios"))), key=str.lower)
 
 
 @dataclass
@@ -195,40 +195,6 @@ class Drive:
         if not isinstance(d, dict):
             return None
         return cls(str(d.get("kind", "disk")), str(d.get("file", "")), str(d.get("format", "raw")))
-
-
-@dataclass
-class Gpu:
-    """The graphics card in the AGP slot. ``None`` on the machine means the
-    machine's own std VGA."""
-    model: str = "radeon9800"
-    romfile: str | None = None
-    gl: str = "off"                 # radeon9800 only
-    raster_threads: int = 0
-    async_engine: str = "auto"
-    agp: bool = True                # rv100 only
-
-    def to_dict(self) -> dict:
-        return {"model": self.model, "romfile": self.romfile, "gl": self.gl,
-                "raster_threads": self.raster_threads, "async_engine": self.async_engine,
-                "agp": self.agp}
-
-    @classmethod
-    def from_dict(cls, d: Any) -> "Gpu | None":
-        if not isinstance(d, dict):
-            return None
-        rom = d.get("romfile")
-        try:
-            threads = int(d.get("raster_threads", 0) or 0)
-        except (TypeError, ValueError):
-            threads = 0
-        return cls(str(d.get("model") or "radeon9800"), str(rom) if rom else None,
-                   str(d.get("gl") or "off"), threads,
-                   str(d.get("async_engine") or "auto"), bool(d.get("agp", True)))
-
-    @property
-    def label(self) -> str:
-        return GPU_LABELS.get(self.model, self.model)
 
 
 HOSTFWD_PROTOS = ("tcp", "udp")
@@ -301,25 +267,6 @@ class Network:
         return NETWORK_MODE_PLATFORM.get(self.mode)
 
 
-@dataclass
-class PromEnv:
-    """Open Firmware variables, set in the NVRAM at every start (see the
-    module docstring)."""
-    auto_boot: bool = True
-    boot_device: str = ""
-    boot_args: str = ""
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, d: Any) -> "PromEnv":
-        if not isinstance(d, dict):
-            return cls()
-        return cls(bool(d.get("auto_boot", True)), str(d.get("boot_device", "")),
-                   str(d.get("boot_args", "")))
-
-
 USB_ID_RE = re.compile(r"^[0-9a-f]{4}:[0-9a-f]{4}$")
 
 
@@ -353,40 +300,32 @@ def usb_host_devices_from(value: Any) -> list[UsbHostDevice]:
 
 SHARE_SCOPES = ("guest-only", "all-interfaces")
 SHARE_DEFAULT_USER = "guest"
-SHARE_DEFAULT_VOLUME = "Host"
-SHARE_VOLUME_MAX = 27            # an HFS volume name
 
 
 @dataclass
 class Share:
     """One host folder, offered to the guest over FTP while it runs (see
-    g5_share.py) and/or attached as a volume over virtio-9p."""
+    x86_share.py)."""
     folder: str = ""             # "" = no shared folder
     user: str = SHARE_DEFAULT_USER
     password: str = ""
     scope: str = "guest-only"    # guest-only | all-interfaces
     ftp: bool = False            # serve the folder over FTP
-    volume: bool = False         # attach it as a Mac OS X volume (virtio-9p)
-    volume_name: str = SHARE_DEFAULT_VOLUME
 
     def to_dict(self) -> dict:
         return {"folder": self.folder, "user": self.user, "password": self.password,
-                "scope": self.scope, "ftp": self.ftp, "volume": self.volume,
-                "volume_name": self.volume_name}
+                "scope": self.scope, "ftp": self.ftp}
 
     @classmethod
     def from_dict(cls, d: Any) -> "Share":
         if not isinstance(d, dict):
             return cls()
         folder = str(d.get("folder", "") or "")
-        # records from before the FTP option shared their folder over FTP
         return cls(folder,
                    str(d.get("user", SHARE_DEFAULT_USER) or SHARE_DEFAULT_USER),
                    str(d.get("password", "") or ""),
                    str(d.get("scope", "guest-only") or "guest-only"),
-                   bool(d.get("ftp", bool(folder.strip()))),
-                   bool(d.get("volume", False)),
-                   str(d.get("volume_name", SHARE_DEFAULT_VOLUME) or SHARE_DEFAULT_VOLUME))
+                   bool(d.get("ftp", False)))
 
     @property
     def enabled(self) -> bool:
@@ -396,56 +335,70 @@ class Share:
     def ftp_on(self) -> bool:
         return self.enabled and self.ftp
 
-    @property
-    def volume_on(self) -> bool:
-        return self.enabled and self.volume
+
+def new_uuid() -> str:
+    return str(_uuid.uuid4()).upper()
+
+
+def name_uuid(name: str) -> str:
+    """A uuid derived from the name, for a record that has none."""
+    return str(_uuid.uuid5(_uuid.NAMESPACE_DNS, f"{name}.x86-opencore")).upper()
+
+
+def _int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
 class Machine:
     name: str = "New machine"
+    mac_model: str = MAC_MODEL_DEFAULT
+    os: str = OS_DEFAULT
+    smp: int = SMP_DEFAULT
     ram_mb: int = RAM_DEFAULT
-    smp: int = 1
-    decr_cap_ms: int = 0           # 0 = off; else -M mac99,decr-cap-ms=N
-    bios: str = FIRMWARE_FILE
+    accel: str = ACCEL_DEFAULT
     display: str = "cocoa"
     vnc: str = ""                  # "" = off; else a -vnc display spec, e.g. ":1"
-    audio: str = "default"
-    usb_audio: bool = False
-    cd_audio: bool = True          # CD drives play audio discs out of the sound backend
-    usb_tablet: bool = False
-    gpu: Gpu | None = None
+    resolution: str = RESOLUTION_DEFAULT
+    show_picker: bool = False
+    boot_args: str = ""            # kernel arguments after the fixed ones
+    serial_log: bool = False
+    drives: list = field(default_factory=lambda: [None] * len(DRIVE_SLOTS))
     network: Network = field(default_factory=Network)
-    boot_slot: int | None = None   # index into drives, or None -- see resolved_boot_kind
-    drives: list = field(default_factory=lambda: [None, None, None, None])
-    prom_env: PromEnv = field(default_factory=PromEnv)
-    share: Share = field(default_factory=Share)
+    usb_tablet: bool = True        # False: usb-mouse
+    usb_audio: bool = False
     usb_host_devices: list = field(default_factory=list)   # [UsbHostDevice]
+    share: Share = field(default_factory=Share)
     rtc_base: str = ""
     extra_args: str = ""
+    uuid: str = field(default_factory=new_uuid)
     notes: str = ""
 
     def to_dict(self) -> dict:
         return {
             "schema": SCHEMA,
             "name": self.name,
-            "ram_mb": self.ram_mb,
+            "uuid": self.uuid,
+            "mac_model": self.mac_model,
+            "os": self.os,
             "smp": self.smp,
-            "decr_cap_ms": self.decr_cap_ms,
-            "bios": self.bios,
+            "ram_mb": self.ram_mb,
+            "accel": self.accel,
             "display": self.display,
             "vnc": self.vnc,
-            "audio": self.audio,
-            "usb_audio": self.usb_audio,
-            "cd_audio": self.cd_audio,
-            "usb_tablet": self.usb_tablet,
-            "gpu": self.gpu.to_dict() if self.gpu else None,
-            "network": self.network.to_dict(),
-            "boot_slot": self.boot_slot,
+            "resolution": self.resolution,
+            "show_picker": self.show_picker,
+            "boot_args": self.boot_args,
+            "serial_log": self.serial_log,
             "drives": [d.to_dict() if d else None for d in self.drives],
-            "prom_env": self.prom_env.to_dict(),
-            "share": self.share.to_dict(),
+            "network": self.network.to_dict(),
+            "usb_tablet": self.usb_tablet,
+            "usb_audio": self.usb_audio,
             "usb_host_devices": [u.to_dict() for u in self.usb_host_devices],
+            "share": self.share.to_dict(),
             "rtc_base": self.rtc_base,
             "extra_args": self.extra_args,
             "notes": self.notes,
@@ -456,29 +409,29 @@ class Machine:
         drives = [Drive.from_dict(x) for x in list(d.get("drives") or [])][:len(DRIVE_SLOTS)]
         while len(drives) < len(DRIVE_SLOTS):
             drives.append(None)
-        boot_slot = d.get("boot_slot")
-        boot_slot = int(boot_slot) if isinstance(boot_slot, int) else None
+        name = str(d.get("name", "New machine"))
         return cls(
-            name=str(d.get("name", "New machine")),
-            ram_mb=int(d.get("ram_mb", RAM_DEFAULT)),
-            smp=int(d.get("smp", 1) or 1),
-            decr_cap_ms=int(d.get("decr_cap_ms", 0) or 0),
-            bios=str(d.get("bios") or FIRMWARE_FILE),
+            name=name,
+            mac_model=str(d.get("mac_model") or MAC_MODEL_DEFAULT),
+            os=str(d.get("os") or OS_DEFAULT),
+            smp=_int(d.get("smp", SMP_DEFAULT) or SMP_DEFAULT, SMP_DEFAULT),
+            ram_mb=_int(d.get("ram_mb", RAM_DEFAULT), RAM_DEFAULT),
+            accel=str(d.get("accel") or ACCEL_DEFAULT),
             display=str(d.get("display") or default_display(paths.HOST_PLATFORM)),
             vnc=str(d.get("vnc", "") or ""),
-            audio=str(d.get("audio", "default")),
-            usb_audio=bool(d.get("usb_audio", False)),
-            cd_audio=bool(d.get("cd_audio", True)),
-            usb_tablet=bool(d.get("usb_tablet", False)),
-            gpu=Gpu.from_dict(d.get("gpu")),
-            network=Network.from_dict(d.get("network")),
-            boot_slot=boot_slot,
+            resolution=str(d.get("resolution") or RESOLUTION_DEFAULT),
+            show_picker=bool(d.get("show_picker", False)),
+            boot_args=str(d.get("boot_args", "") or ""),
+            serial_log=bool(d.get("serial_log", False)),
             drives=drives,
-            prom_env=PromEnv.from_dict(d.get("prom_env")),
-            share=Share.from_dict(d.get("share")),
+            network=Network.from_dict(d.get("network")),
+            usb_tablet=bool(d.get("usb_tablet", True)),
+            usb_audio=bool(d.get("usb_audio", False)),
             usb_host_devices=usb_host_devices_from(d.get("usb_host_devices")),
+            share=Share.from_dict(d.get("share")),
             rtc_base=str(d.get("rtc_base", "") or ""),
-            extra_args=str(d.get("extra_args", "")),
+            extra_args=str(d.get("extra_args", "") or ""),
+            uuid=str(d.get("uuid") or "").strip().upper() or name_uuid(name),
             notes=str(d.get("notes", "")),
         )
 
@@ -500,9 +453,8 @@ class Machine:
         return Machine.from_dict(self.to_dict())
 
     def first_unfilled_disk_slot(self) -> int | None:
-        """The first position a new hard disk can go in: SATA first."""
-        for i in (SATA_A, SATA_B, ATA_MASTER):
-            d = self.drives[i]
+        """The first position a new hard disk can go in."""
+        for i, d in enumerate(self.drives):
             if d is None or not d.file:
                 return i
         return None
@@ -516,29 +468,34 @@ class Machine:
     def image_paths(self) -> list[str]:
         return [f for _label, f in _image_files(self) if f]
 
+    @property
+    def kernel_arch(self) -> str:
+        return OS_KERNEL_ARCH.get(self.os, "i386")
+
 
 def new_machine(name: str) -> Machine:
-    """A fresh record: one CPU, no drive, the machine's own graphics. No file
-    field is ever filled in."""
-    return Machine(name=name, display=default_display(paths.HOST_PLATFORM))
+    """A fresh record with the defaults and its own uuid. No file field is
+    ever filled in."""
+    return Machine(name=name, display=default_display(paths.HOST_PLATFORM), uuid=new_uuid())
 
 
 def file_fields(m: Machine) -> dict[str, str]:
-    fields = {"gpu.romfile": (m.gpu.romfile or "") if m.gpu else ""}
-    for i, d in enumerate(m.drives):
-        fields[f"drives[{i}]"] = d.file if d else ""
-    return fields
+    return {f"drives[{i}]": (d.file if d else "") for i, d in enumerate(m.drives)}
 
 
-def start_blockers(m: Machine) -> list[str]:
-    """The firmware ships with the emulator, so nothing has to be chosen
-    before Start."""
-    return []
+def start_blockers(m: Machine, key_file: str | Path | None = None) -> list[str]:
+    """What stops a start: the SMC key file."""
+    why = smc_key_problem(key_file if key_file is not None else paths.default_smc_key_file())
+    return [why] if why else []
 
 
 # ---------------------------------------------------------------- checking
 
-def validate(m: Machine, qemu_dir: str | None, platform: str = paths.HOST_PLATFORM,
+def boot_arg_tokens(text: str) -> list[str]:
+    return (text or "").split()
+
+
+def validate(m: Machine, qemu_dir: str | None = None, platform: str = paths.HOST_PLATFORM,
              check_files: bool = True, machine_dir: str | None = None) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -547,12 +504,20 @@ def validate(m: Machine, qemu_dir: str | None, platform: str = paths.HOST_PLATFO
         errors.append("This machine has no name.")
     elif not NAME_RE.match(m.name) or m.name.strip() != m.name:
         errors.append("That name will not work.")
-    if not (RAM_MIN <= m.ram_mb <= RAM_MAX):
-        errors.append(f"Memory has to be between {RAM_MIN} and {RAM_MAX} MB.")
-    if not (SMP_MIN <= m.smp <= SMP_MAX):
-        errors.append(f"CPUs has to be between {SMP_MIN} and {SMP_MAX}.")
-    if m.decr_cap_ms < 0:
-        errors.append("The timer kick interval can't be negative.")
+    if m.mac_model not in MAC_MODELS:
+        errors.append(f"'{m.mac_model}' is not a Mac model this machine can be.")
+    if m.os not in OS_VERSIONS:
+        errors.append(f"'{m.os}' is not a Mac OS X version this machine can run.")
+    if m.ram_mb not in RAM_CHOICES:
+        errors.append("Memory has to be " + ", ".join(str(x) for x in RAM_CHOICES) + " MB.")
+    if m.smp not in SMP_CHOICES:
+        errors.append("Processors has to be " + ", ".join(str(x) for x in SMP_CHOICES) + ".")
+    if m.accel not in ("tcg", "hvf", "whpx"):
+        errors.append(f"'{m.accel}' is not an acceleration setting.")
+    elif m.accel not in accel_choices(platform):
+        warnings.append(f"{m.accel} does not work on this computer.")
+    if m.resolution not in RESOLUTIONS:
+        errors.append("Screen size at boot has to be " + ", ".join(RESOLUTIONS) + ".")
     if m.display == "cocoa" and platform != "darwin":
         warnings.append("'cocoa' only works on a Mac.")
     if m.vnc.strip() and not VNC_RE.match(m.vnc.strip()):
@@ -560,26 +525,16 @@ def validate(m: Machine, qemu_dir: str | None, platform: str = paths.HOST_PLATFO
     if m.rtc_base.strip() and not RTC_BASE_RE.match(m.rtc_base.strip()):
         errors.append("Date and time has to be localtime, utc, or look like "
                       "2005-04-29T10:30:00.")
-
-    gpu = m.gpu
-    if gpu is not None:
-        if gpu.model not in GPU_MODELS:
-            errors.append(f"'{gpu.model}' is not a graphics card.")
-        if gpu.gl not in GL_MODES:
-            errors.append(f"'{gpu.gl}' is not an OpenGL setting.")
-        if gpu.async_engine not in ASYNC_MODES:
-            errors.append(f"'{gpu.async_engine}' is not an engine thread setting.")
-        if not (RASTER_MIN <= gpu.raster_threads <= RASTER_MAX):
-            errors.append(f"Raster threads has to be between {RASTER_MIN} and {RASTER_MAX}.")
-        if not gpu.romfile:
-            warnings.append("The graphics card has no ROM file.")
+    if "-v" in boot_arg_tokens(m.boot_args):
+        errors.append("Verbose boot (-v) cannot be used: the Mac OS X 10.5 boot loader "
+                      "crashes with it.")
 
     net = m.network
     if net.mode not in NETWORK_MODES:
         errors.append(f"'{net.mode}' is not a network setting.")
     else:
         if net.mode != "none" and not MAC_RE.match(net.mac):
-            errors.append("The card address has to look like 00:05:02:12:34:56.")
+            errors.append("The card address has to look like 52:54:00:12:34:56.")
         if net.mode in NETWORK_MODES_WITH_IFNAME and not net.ifname.strip():
             errors.append("No interface named.")
         for r in net.hostfwd:
@@ -593,33 +548,11 @@ def validate(m: Machine, qemu_dir: str | None, platform: str = paths.HOST_PLATFO
         if net.platform is not None and net.platform != host:
             warnings.append("This network setting only works on "
                             f"{'a Mac' if net.platform == 'darwin' else 'Windows'}.")
-
     if len(m.drives) != len(DRIVE_SLOTS):
-        errors.append("There are not four drive positions.")
-    if m.boot_slot is not None and not (0 <= m.boot_slot < len(m.drives)):
-        errors.append("The marked boot drive is not a real drive position.")
-
+        errors.append(f"There are not {len(DRIVE_SLOTS)} drive positions.")
     for i, d in enumerate(m.drives[:len(DRIVE_SLOTS)]):
-        if d is None or not d.file:
-            continue
-        if d.kind not in DRIVE_KINDS:
+        if d is not None and d.file and d.kind not in DRIVE_KINDS:
             errors.append(f"{slot_name(i)} has no drive type.")
-        elif d.kind not in slot_kinds(i):
-            if is_sata(i):
-                errors.append(f"{slot_name(i)} takes a hard disk; a CD goes on the ATA-100.")
-            else:
-                errors.append(f"{slot_name(i)} takes a CD; a second hard disk goes on SATA.")
-
-    if m.boot_slot is not None and 0 <= m.boot_slot < len(m.drives):
-        marked = m.drives[m.boot_slot]
-        if marked is None or not marked.file:
-            warnings.append(f"{slot_name(m.boot_slot)} is marked Boot but is empty.")
-        elif marked.kind in DRIVE_KINDS:
-            winner = lowest_slot_of_kind(m, marked.kind)
-            if winner is not None and winner != m.boot_slot:
-                kind_word = "CD" if marked.kind == "cdrom" else "hard disk"
-                warnings.append(f"{slot_name(m.boot_slot)} is marked Boot, but "
-                                f"{slot_name(winner)} (also a {kind_word}) will boot first.")
 
     share = m.share
     if share.scope not in SHARE_SCOPES:
@@ -627,8 +560,8 @@ def validate(m: Machine, qemu_dir: str | None, platform: str = paths.HOST_PLATFO
     if share.enabled:
         if not Path(share.folder.strip()).expanduser().is_dir():
             errors.append("The shared folder is not a folder that exists.")
-        if not share.ftp and not share.volume:
-            warnings.append("The shared folder has neither FTP nor a volume on.")
+        if not share.ftp:
+            warnings.append("The shared folder is not served over FTP.")
     if share.ftp_on:
         if not share.user.strip():
             errors.append("The shared folder has no user name.")
@@ -636,11 +569,6 @@ def validate(m: Machine, qemu_dir: str | None, platform: str = paths.HOST_PLATFO
             errors.append("Sharing on all interfaces needs a password.")
         if share.scope == "guest-only" and net.mode != "user":
             warnings.append("Guest only sharing is only reachable with default (slirp).")
-    if share.volume_on:
-        name = share.volume_name.strip()
-        if not name or len(name) > SHARE_VOLUME_MAX or ":" in name or "/" in name:
-            errors.append(f"The volume name has to be 1 to {SHARE_VOLUME_MAX} characters, "
-                          "without a colon or a slash.")
 
     for u in m.usb_host_devices:
         if not USB_ID_RE.match(u.id):
@@ -649,15 +577,6 @@ def validate(m: Machine, qemu_dir: str | None, platform: str = paths.HOST_PLATFO
         warnings.append("Host USB devices only work on a Mac or on Windows.")
 
     if check_files:
-        qd = qemu_dir or ""
-        if qd and paths.has_qemu(qd, platform):
-            fw = paths.join_path(qd, m.bios or FIRMWARE_FILE, platform)
-            if not Path(fw).is_file():
-                warnings.append(f"The firmware is missing: {fw}")
-            rel = gpu.romfile if gpu else None
-            if rel and not Path(paths.join_path(qd, rel, platform)).is_file():
-                warnings.append("The graphics card's ROM is missing: "
-                                f"{paths.join_path(qd, rel, platform)}")
         for label, f in _image_files(m):
             if not f:
                 continue
@@ -704,6 +623,11 @@ class DeleteResult:
     @property
     def kept_images(self) -> list[str]:
         return [f for f in self.kept if looks_like_disk_image(f)]
+
+
+def _owned(rel: str) -> bool:
+    """A file of the machine folder this program made (a path relative to it)."""
+    return rel in OWNED_FILES or any(rel.startswith(d + "/") for d in OWNED_DIRS)
 
 
 class Library:
@@ -772,6 +696,7 @@ class Library:
             raise FileExistsError(f"A machine called '{new_name}' already exists.")
         m = self.load(name)
         m.name = new_name
+        m.uuid = new_uuid()
         self.save(m)
         for f in SAVED_SETTINGS_FILES:
             src = self.folder(name) / f
@@ -788,8 +713,8 @@ class Library:
 
     def delete_preview(self, name: str) -> tuple[list[str], list[str]]:
         contents = self.folder_contents(name)
-        removed = [f for f in contents if f in OWNED_FILES]
-        kept = [f for f in contents if f not in OWNED_FILES]
+        removed = [f for f in contents if _owned(f)]
+        kept = [f for f in contents if not _owned(f)]
         return removed, kept
 
     def delete(self, name: str) -> DeleteResult:
@@ -797,14 +722,24 @@ class Library:
         result = DeleteResult(folder=d)
         if not d.is_dir() or d.resolve().parent != self.root.resolve():
             return result
-        for f in OWNED_FILES:
+        for f in self.folder_contents(name):
+            if not _owned(f):
+                continue
             p = d / f
-            if p.is_symlink() or p.is_file():
-                try:
-                    p.unlink()
-                except OSError:
-                    continue
-                result.removed.append(f)
+            try:
+                p.unlink()
+            except OSError:
+                continue
+            result.removed.append(f)
+        for top in OWNED_DIRS:
+            base = d / top
+            if base.is_dir():
+                for sub in sorted((q for q in base.rglob("*") if q.is_dir()),
+                                  key=lambda q: len(q.parts), reverse=True) + [base]:
+                    try:
+                        sub.rmdir()
+                    except OSError:
+                        pass
         result.kept = self.folder_contents(name)
         if not result.kept:
             for sub in sorted((p for p in d.rglob("*") if p.is_dir()),

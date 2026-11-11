@@ -18,10 +18,13 @@ from dataclasses import dataclass
 
 ID_RE = re.compile(r"^[0-9a-f]{4}:[0-9a-f]{4}$")
 
-# The G5's USB buses: the EHCI takes high-speed devices only and has no
-# companion controller; the second OHCI is empty.
-BUS_HIGH_SPEED = "usb-bus.2"
-BUS_FULL_SPEED = "usb-bus.1"
+# The machine's UHCI controller takes low- and full-speed devices; an EHCI
+# controller, added when a high-speed device is passed through, takes high-
+# and super-speed ones (it has no companion controller).
+EHCI_ID = "ehci"
+BUS_HIGH_SPEED = f"{EHCI_ID}.0"
+BUS_FULL_SPEED = "uhci.0"
+EHCI_DEVICE = f"usb-ehci,id={EHCI_ID}"
 
 SPEEDS = {0: "low", 1: "full", 2: "high", 3: "super", 4: "super"}
 
@@ -170,8 +173,12 @@ def host_devices() -> list[HostDevice]:
 
 
 def qemu_tokens(devices) -> list[str]:
-    """-device usb-host for [(id, speed)], on the bus the speed picks."""
+    """-device usb-host for [(id, speed)], on the bus the speed picks; the
+    EHCI controller comes first when a device needs it."""
     out: list[str] = []
+    devices = list(devices)
+    if any(bus_for_speed(speed) == BUS_HIGH_SPEED for _id, speed in devices):
+        out += ["-device", EHCI_DEVICE]
     for dev_id, speed in devices:
         vid, pid = dev_id.split(":")
         out += ["-device", f"usb-host,vendorid=0x{vid},productid=0x{pid},"

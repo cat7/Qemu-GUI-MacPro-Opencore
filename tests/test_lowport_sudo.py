@@ -7,9 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from qemugui import g5_command as command  # noqa: E402
-from qemugui.g5_model import Machine  # noqa: E402
-from qemugui.g5_model import HostFwd  # noqa: E402
+from qemugui import x86_command as command  # noqa: E402
+from qemugui.x86_model import Machine  # noqa: E402
+from qemugui.x86_model import HostFwd  # noqa: E402
 
 QD = "/Applications/q"
 MD = "/m"

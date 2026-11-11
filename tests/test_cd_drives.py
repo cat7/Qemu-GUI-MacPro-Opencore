@@ -1,4 +1,4 @@
-"""CD images (cue, dmg), host optical drives and CD audio out."""
+"""CD images (cue, dmg), host optical drives and the audio backends."""
 from __future__ import annotations
 
 import plistlib
@@ -9,10 +9,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from qemugui import g5_command as command  # noqa: E402
-from qemugui import g5_model as model  # noqa: E402
+from qemugui import x86_command as command  # noqa: E402
+from qemugui import x86_model as model  # noqa: E402
 from qemugui import optical, paths  # noqa: E402
-from qemugui.g5_model import Machine, Drive  # noqa: E402
+from qemugui.x86_model import Machine, Drive  # noqa: E402
 
 QD = "/Applications/q"
 MD = "/m"
@@ -20,9 +20,9 @@ NAME = "drive:HL-DT-ST DVDRAM GP57EB40"
 
 
 def machine(*drives) -> Machine:
-    """Positions in order: ATA-100 master, ATA-100 slave, SATA A, SATA B."""
+    """Positions in order: SATA ports 1 to 5."""
     m = Machine(name="C", display="cocoa")
-    m.drives = list(drives) + [None] * (4 - len(drives))
+    m.drives = list(drives) + [None] * (5 - len(drives))
     return m
 
 
@@ -31,7 +31,8 @@ def cd(file, fmt="raw") -> Drive:
 
 
 def drives(argv):
-    return [argv[i + 1] for i, t in enumerate(argv) if t == "-drive"]
+    """The -drive values of the machine's own drives (SATA ports 1 to 5)."""
+    return [argv[i + 1] for i, t in enumerate(argv) if t == "-drive" and "id=sata" in argv[i + 1]]
 
 
 def devices(argv):
@@ -64,12 +65,11 @@ class Formats(unittest.TestCase):
 
 
 class CdImages(unittest.TestCase):
-    def test_cue_cd_with_audio(self):
-        m = machine(None, cd("/c/disc.cue", "cue"))
-        argv = command.build_argv(m, QD, MD, "darwin")
-        self.assertEqual(drives(argv), ["file=/c/disc.cue,format=cue,media=cdrom,index=2"])
-        self.assertEqual(audiodevs(argv), ["coreaudio,id=snd0", "coreaudio,id=cdaudio"])
-        self.assertIn("ide-cd.audiodev=cdaudio", globals_(argv))
+    def test_cue_cd(self):
+        argv = command.build_argv(machine(None, cd("/c/disc.cue", "cue")), QD, MD, "darwin")
+        self.assertEqual(drives(argv), ["id=sata2,if=none,format=cue,readonly=on,media=cdrom,"
+                                        "file=/c/disc.cue"])
+        self.assertIn("ide-cd,bus=ide.2,drive=sata2", devices(argv))
 
     def test_cue_detected_from_a_raw_record(self):
         with tempfile.TemporaryDirectory() as d:
@@ -79,57 +79,45 @@ class CdImages(unittest.TestCase):
 
     def test_dmg_cd_is_readonly(self):
         argv = command.build_argv(machine(cd("/c/x.dmg", "dmg")), QD, MD, "darwin")
-        self.assertEqual(drives(argv),
-                         ["file=/c/x.dmg,format=dmg,media=cdrom,index=2,readonly=on"])
+        self.assertEqual(drives(argv), ["id=sata1,if=none,format=dmg,readonly=on,media=cdrom,"
+                                        "file=/c/x.dmg"])
 
     def test_dmg_hard_disks_are_snapshots(self):
         m = machine(Drive("disk", "/c/x.dmg", "dmg"), None, Drive("disk", "/c/y.dmg", "dmg"))
         self.assertEqual(drives(command.build_argv(m, QD, MD, "darwin")),
-                         ["file=/c/x.dmg,format=dmg,media=disk,index=0,snapshot=on",
-                          "file=/c/y.dmg,format=dmg,if=none,id=sata0,snapshot=on"])
+                         ["id=sata1,if=none,format=dmg,file=/c/x.dmg,snapshot=on",
+                          "id=sata3,if=none,format=dmg,file=/c/y.dmg,snapshot=on"])
 
     def test_raw_hard_disk_unchanged(self):
         argv = command.build_argv(machine(Drive("disk", "/c/x.img")), QD, MD, "darwin")
-        self.assertEqual(drives(argv), ["file=/c/x.img,format=raw,media=disk,index=0"])
-
-    def test_no_cd_no_cd_audiodev(self):
-        argv = command.build_argv(machine(Drive("disk", "/a.img")), QD, MD, "darwin")
-        self.assertEqual(audiodevs(argv), ["coreaudio,id=snd0"])
-        self.assertEqual(globals_(argv), ["macio-newworld.audiodev=snd0"])
+        self.assertEqual(drives(argv), ["id=sata1,if=none,format=raw,file=/c/x.img"])
+        self.assertIn("ide-hd,bus=ide.1,drive=sata1", devices(argv))
 
 
-class CdAudio(unittest.TestCase):
-    def test_reuses_the_usb_audiodev(self):
-        m = machine(None, cd("/a.iso"))
+class Audio(unittest.TestCase):
+    def test_no_audio_without_the_usb_device(self):
+        argv = command.build_argv(machine(None, cd("/a.iso")), QD, MD, "darwin")
+        self.assertEqual(audiodevs(argv), [])
+        self.assertEqual(globals_(argv), ["ICH9-LPC.disable_s3=1", "ICH9-LPC.disable_s4=1"])
+
+    def test_usb_audio_has_its_own_backend(self):
+        m = machine()
         m.usb_audio = True
         argv = command.build_argv(m, QD, MD, "darwin")
-        self.assertEqual(audiodevs(argv), ["coreaudio,id=snd0", "coreaudio,id=usb"])
-        self.assertIn("ide-cd.audiodev=usb", globals_(argv))
+        self.assertEqual(audiodevs(argv), ["coreaudio,id=usb"])
+        self.assertIn("usb-audio,audiodev=usb,bus=uhci.0", devices(argv))
 
-    def test_own_backend_when_usb_audio_comes_from_extra_args(self):
-        m = machine(None, cd("/a.iso"))
+    def test_usb_audio_from_extra_args_is_not_added_twice(self):
+        m = machine()
         m.usb_audio = True
         m.extra_args = "-device usb-audio,audiodev=mine"
-        argv = command.build_argv(m, QD, MD, "darwin")
-        self.assertEqual(audiodevs(argv), ["coreaudio,id=snd0", "coreaudio,id=cdaudio"])
-        self.assertIn("ide-cd.audiodev=cdaudio", globals_(argv))
+        self.assertEqual(audiodevs(command.build_argv(m, QD, MD, "darwin")), [])
 
     def test_windows_backend(self):
-        argv = command.build_argv(machine(None, cd("/a.iso")), "C:\\q", "C:\\m", "win32")
-        self.assertIn("dsound,id=cdaudio", audiodevs(argv))
-
-    def test_off_means_no_audiodev_property(self):
-        m = machine(None, cd("/a.iso"))
-        m.cd_audio = False
-        argv = command.build_argv(m, QD, MD, "darwin")
-        self.assertEqual(audiodevs(argv), ["coreaudio,id=snd0"])
-        self.assertNotIn("ide-cd.audiodev", " ".join(globals_(argv)))
-
-    def test_default_on_and_old_records_load_on(self):
-        self.assertTrue(Machine().cd_audio)
-        self.assertTrue(Machine.from_dict({"name": "x"}).cd_audio)
-        self.assertFalse(Machine.from_dict({"name": "x", "cd_audio": False}).cd_audio)
-        self.assertFalse(Machine.from_json(Machine(cd_audio=False).to_json()).cd_audio)
+        m = machine()
+        m.usb_audio = True
+        argv = command.build_argv(m, "C:\\q", "C:\\m", "win32")
+        self.assertEqual(audiodevs(argv), ["dsound,id=usb"])
 
 
 class HostDrive(unittest.TestCase):
@@ -143,9 +131,9 @@ class HostDrive(unittest.TestCase):
 
     def test_macos_argv_names_the_drive(self):
         argv = command.build_argv(machine(None, cd(self.NAME)), QD, MD, "darwin")
-        self.assertEqual(drives(argv), ["driver=host_cdrom,drive=HL-DT-ST DVDRAM GP57EB40,"
-                                        "media=cdrom,index=2"])
-        self.assertIn("ide-cd.audiodev=cdaudio", globals_(argv))
+        self.assertEqual(drives(argv), ["id=sata2,if=none,driver=host_cdrom,"
+                                        "drive=HL-DT-ST DVDRAM GP57EB40,media=cdrom"])
+        self.assertIn("ide-cd,bus=ide.2,drive=sata2", devices(argv))
 
     def test_drive_name_commas_escaped(self):
         argv = command.build_argv(machine(cd("drive:ACME CD,X")), QD, MD, "darwin")
@@ -154,13 +142,13 @@ class HostDrive(unittest.TestCase):
     def test_old_disc_record_follows_the_first_drive(self):
         argv = command.build_argv(machine(cd("/dev/disk5")), QD, MD, "darwin")
         self.assertEqual(drives(argv),
-                         ["driver=host_cdrom,filename=/dev/cdrom,media=cdrom,index=2"])
+                         ["id=sata1,if=none,driver=host_cdrom,filename=/dev/cdrom,media=cdrom"])
 
     def test_windows_argv(self):
         for f in ("d:", "D:\\", "\\\\.\\D:"):
             argv = command.build_argv(machine(cd(f)), "C:\\q", "C:\\m", "win32")
             self.assertEqual(drives(argv),
-                             ["driver=host_cdrom,drive=D:,media=cdrom,index=2"], f)
+                             ["id=sata1,if=none,driver=host_cdrom,drive=D:,media=cdrom"], f)
 
     def test_records_from_the_other_host(self):
         mac = machine(cd(self.NAME))

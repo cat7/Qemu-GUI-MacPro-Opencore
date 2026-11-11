@@ -2,7 +2,7 @@
 beside it, and the Machines folder beside it.
 
 There is no configurable QEMU folder and no configurable machine library.
-This program is a companion to one copy of ``qemu-system-ppc64``: it lives in
+This program is a companion to one copy of ``qemu-system-x86_64``: it lives in
 the same folder as that program, and keeps its machines in a ``Machines``
 folder next to itself.
 
@@ -20,12 +20,29 @@ import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
-APP_NAME = "Qemu-system-ppc64 G5 Openbios GUI"
-QEMU_BINARY = "qemu-system-ppc64"
+APP_NAME = "Qemu-system-x86_64 OpenCore GUI"
+QEMU_BINARY = "qemu-system-x86_64"
 HOST_PLATFORM = sys.platform  # "darwin" | "win32" | "linux"
 
 MACHINES_DIR_NAME = "Machines"
 SETTINGS_FILE_NAME = "settings.json"
+PC_BIOS_DIR_NAME = "pc-bios"
+OPENCORE_DIR_NAME = "OpenCore"
+KEXTS_DIR_NAME = "Kexts"
+SMC_KEY_FILE_NAME = "OSK-Key.txt"
+OVMF_CODE_NAME = "edk2-x86_64-code.fd"
+OVMF_VARS_TEMPLATE_NAME = "edk2-i386-vars.fd"
+OVMF_VARS_NAME = "OVMF_VARS.fd"
+# the OpenCore files the generator reads, relative to the OpenCore folder
+OPENCORE_BOOT_EFI = "X64/EFI/BOOT/BOOTx64.efi"
+OPENCORE_MAIN_EFI = "X64/EFI/OC/OpenCore.efi"
+OPENCORE_DRIVERS = ("OpenRuntime.efi", "OpenHfsPlus.efi", "OpenPartitionDxe.efi",
+                    "ResetNvramEntry.efi")
+OPENCORE_TOOL = "X64/EFI/OC/Tools/OpenShell.efi"
+OPENCORE_SAMPLE_PLIST = "Docs/Sample.plist"
+OPENCORE_FILES = (OPENCORE_BOOT_EFI, OPENCORE_MAIN_EFI,
+                  *(f"X64/EFI/OC/Drivers/{d}" for d in OPENCORE_DRIVERS),
+                  OPENCORE_TOOL, OPENCORE_SAMPLE_PLIST)
 
 # The folder holding the entry script, used when running from source.
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
@@ -106,6 +123,22 @@ def qemu_binary(platform: str = HOST_PLATFORM) -> Path:
 
 def qemu_img_binary(platform: str = HOST_PLATFORM) -> Path:
     return install_dir() / qemu_img_name(platform)
+
+
+def pc_bios_dir() -> Path:
+    return install_dir() / PC_BIOS_DIR_NAME
+
+
+def opencore_dir() -> Path:
+    return install_dir() / OPENCORE_DIR_NAME
+
+
+def kexts_dir() -> Path:
+    return install_dir() / KEXTS_DIR_NAME
+
+
+def default_smc_key_file() -> Path:
+    return install_dir() / SMC_KEY_FILE_NAME
 
 
 def has_qemu(folder: Path | str | None, platform: str = HOST_PLATFORM) -> bool:
@@ -349,17 +382,59 @@ def quote_extra(token: str) -> str:
     return shlex.quote(token)
 
 
+# A run-time variable is a value the launcher reads from a file each time it
+# runs, so the value is never written into the launcher. An argv token names
+# one with ``{{NAME}}`` inside it; a variable is passed to the renderers as
+# (NAME, file).
+RUNTIME_RE = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}")
+
+
+def runtime_ref(name: str) -> str:
+    return "{{" + name + "}}"
+
+
+def has_runtime_ref(token: str) -> bool:
+    return bool(RUNTIME_RE.search(token))
+
+
+def shell_dquote(token: str) -> str:
+    """The token in double quotes, a run-time reference as $NAME."""
+    out = []
+    pos = 0
+    for m in RUNTIME_RE.finditer(token):
+        out.append(re.sub(r'([\\"$`])', r"\\\1", token[pos:m.start()]))
+        out.append("$" + m.group(1))
+        pos = m.end()
+    out.append(re.sub(r'([\\"$`])', r"\\\1", token[pos:]))
+    return '"' + "".join(out) + '"'
+
+
+def _single_quote(text: str) -> str:
+    return "'" + text.replace("'", "'\"'\"'") + "'"
+
+
+def shell_runtime_lines(runtime) -> list[str]:
+    return [f"{name}=\"$(cat {_single_quote(str(file))})\"" for name, file in runtime]
+
+
 def render_groups(argv: list[str], quote, quote_extra, extra: int,
-                  quoted_values: tuple[str, ...] = ()) -> list[str]:
+                  quoted_values: tuple[str, ...] = (), runtime_quote=None) -> list[str]:
     """One line per option; the last *extra* tokens of argv, and the values of
     the options in *quoted_values*, are quoted with *quote_extra* instead of
-    *quote*."""
+    *quote*; a token holding a run-time reference goes through *runtime_quote*
+    when there is one."""
     plain = len(argv) - extra
     out: list[str] = []
     n = 1
     for g in group_options(argv):
-        out.append(" ".join((quote_extra if n + j >= plain or (j and g[0] in quoted_values)
-                             else quote)(t) for j, t in enumerate(g)))
+        toks = []
+        for j, t in enumerate(g):
+            if runtime_quote and n + j < plain and has_runtime_ref(t):
+                toks.append(runtime_quote(t))
+            else:
+                toks.append((quote_extra if n + j >= plain or (j and g[0] in quoted_values)
+                             else quote)(t))
+        out.append(" ".join(toks))
         n += len(g)
     return out
 
@@ -379,15 +454,17 @@ def sudo_chown_line(owned_files: tuple[str, ...]) -> str:
 
 
 def render_shell(argv: list[str], header_note: str, owned_files: tuple[str, ...] = (),
-                 sudo: bool = False, extra: int = 0) -> str:
+                 sudo: bool = False, extra: int = 0, runtime=()) -> str:
     lines = ["#!/bin/bash",
              f"# {header_note}",
              'cd "$(dirname "$0")"',
              ""]
+    if runtime:
+        lines += shell_runtime_lines(runtime) + [""]
     if sudo:
         lines += [SUDO_KEEPALIVE, ""]
     lines.append(("sudo " if sudo else "") + shlex.quote(argv[0]) + " \\")
-    body = render_groups(argv, shlex.quote, quote_extra, extra, ("-prom-env",))
+    body = render_groups(argv, shlex.quote, quote_extra, extra, runtime_quote=shell_dquote)
     for i, ln in enumerate(body):
         cont = " \\" if i < len(body) - 1 else ""
         lines.append(ln + cont)
@@ -410,6 +487,25 @@ def bat_quote_extra(token: str) -> str:
     return bat_quote(token, extra=True)
 
 
+def bat_runtime_quote(token: str) -> str:
+    """A token holding a run-time reference, which cmd expands as %NAME%.
+    The rest of the token is quoted as usual and the whole token always sits
+    in double quotes."""
+    out = []
+    pos = 0
+    for m in RUNTIME_RE.finditer(token):
+        out.append(token[pos:m.start()].replace("%", "%%"))
+        out.append("%" + m.group(1) + "%")
+        pos = m.end()
+    out.append(token[pos:].replace("%", "%%"))
+    return '"' + "".join(out) + '"'
+
+
+def bat_runtime_lines(runtime) -> list[str]:
+    """``set /p`` takes the first line of the file."""
+    return [f'set /p {name}=<"{str(file).replace("%", "%%")}"' for name, file in runtime]
+
+
 # The GUI is a windowed build, so Windows gives the emulator a fresh console of
 # its own: name it, cut it down to a readable size, and hold it open on a
 # failure long enough to read what went wrong.
@@ -426,15 +522,18 @@ def bat_title(name: str) -> str:
     return text.strip()[:40] or BAT_TITLE
 
 
-def render_bat(argv: list[str], header_note: str, extra: int = 0, title: str = "") -> str:
+def render_bat(argv: list[str], header_note: str, extra: int = 0, title: str = "",
+               runtime=()) -> str:
     lines = ["@echo off",
              f"rem {header_note}",
              f"title {bat_title(title)}",
              BAT_MODE,
              'cd /d "%~dp0"',
-             "",
-             bat_quote(argv[0]) + " ^"]
-    body = render_groups(argv, bat_quote, bat_quote_extra, extra)
+             ""]
+    if runtime:
+        lines += bat_runtime_lines(runtime) + [""]
+    lines.append(bat_quote(argv[0]) + " ^")
+    body = render_groups(argv, bat_quote, bat_quote_extra, extra, runtime_quote=bat_runtime_quote)
     for i, ln in enumerate(body):
         cont = " ^" if i < len(body) - 1 else ""
         lines.append(ln + cont)
@@ -444,11 +543,11 @@ def render_bat(argv: list[str], header_note: str, extra: int = 0, title: str = "
 
 def render_launcher(argv: list[str], header_note: str, platform: str = HOST_PLATFORM,
                     sudo: bool = False, owned_files: tuple[str, ...] = (),
-                    extra: int = 0, title: str = "") -> str:
+                    extra: int = 0, title: str = "", runtime=()) -> str:
     """The .bat never gets sudo; *sudo* only affects the shell rendering."""
     if is_windows(platform):
-        return render_bat(argv, header_note, extra, title)
-    return render_shell(argv, header_note, owned_files, sudo, extra)
+        return render_bat(argv, header_note, extra, title, runtime)
+    return render_shell(argv, header_note, owned_files, sudo, extra, runtime)
 
 
 def browse_start_dir(current: str | None, fallback: Path | str | None = None) -> Path:
@@ -471,7 +570,22 @@ MISSING_QEMU_MESSAGE = """\
 To run this GUI, put it in a folder containing a "{binary}" application.\
 """
 
+MISSING_FILES_MESSAGE = """\
+The folder this program is in is missing:
+
+{files}\
+"""
+
 UNWRITABLE_MESSAGE = """The "{name}" folder next to this program could not be created: {reason}"""
+
+
+def missing_install_files(folder: Path | str) -> list[str]:
+    """The firmware and OpenCore files absent from the install folder, as
+    paths relative to it."""
+    folder = Path(folder)
+    wanted = [f"{PC_BIOS_DIR_NAME}/{OVMF_CODE_NAME}", f"{PC_BIOS_DIR_NAME}/{OVMF_VARS_TEMPLATE_NAME}"]
+    wanted += [f"{OPENCORE_DIR_NAME}/{f}" for f in OPENCORE_FILES]
+    return [f for f in wanted if not (folder / f).is_file()]
 
 
 def startup_problem(platform: str = HOST_PLATFORM) -> str | None:
@@ -479,6 +593,9 @@ def startup_problem(platform: str = HOST_PLATFORM) -> str | None:
     folder = install_dir()
     if not has_qemu(folder, platform):
         return MISSING_QEMU_MESSAGE.format(binary=qemu_binary_name(platform), folder=f"    {folder}")
+    missing = missing_install_files(folder)
+    if missing:
+        return MISSING_FILES_MESSAGE.format(files="\n".join(f"    {f}" for f in missing))
     machines = machines_dir()
     try:
         machines.mkdir(parents=True, exist_ok=True)
@@ -494,9 +611,15 @@ def startup_problem(platform: str = HOST_PLATFORM) -> str | None:
 
 @dataclass
 class Settings:
-    """The only thing worth remembering between runs: the selected machine."""
+    """What is remembered between runs: the selected machine and where the
+    SMC key file is (never the key itself)."""
 
     last_machine: str = ""
+    smc_key_file: str = ""      # "" = OSK-Key.txt beside the program
+
+    @property
+    def key_file(self) -> str:
+        return self.smc_key_file.strip() or str(default_smc_key_file())
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":
@@ -506,9 +629,11 @@ class Settings:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return s
-        v = data.get("last_machine") if isinstance(data, dict) else None
-        if isinstance(v, str):
-            s.last_machine = v
+        if not isinstance(data, dict):
+            return s
+        for key in ("last_machine", "smc_key_file"):
+            if isinstance(data.get(key), str):
+                setattr(s, key, data[key])
         return s
 
     def save(self, path: Path | None = None) -> None:

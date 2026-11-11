@@ -19,9 +19,9 @@ sys.path.insert(0, str(HERE.parent))
 
 from qemugui import usbhost  # noqa: E402
 from qemugui import paths  # noqa: E402
-from qemugui import g5_command as command  # noqa: E402
-from qemugui import g5_model as model  # noqa: E402
-from qemugui.g5_model import Machine, UsbHostDevice  # noqa: E402
+from qemugui import x86_command as command  # noqa: E402
+from qemugui import x86_model as model  # noqa: E402
+from qemugui.x86_model import Machine, UsbHostDevice  # noqa: E402
 
 
 def dev(vid, pid, name, speed, loc, children=(), cls=0):
@@ -125,11 +125,20 @@ class Finding(unittest.TestCase):
                 self.assertFalse(d.passable)
 
     def test_bus_by_speed(self):
-        self.assertEqual(usbhost.bus_for_speed("high"), "usb-bus.2")
-        self.assertEqual(usbhost.bus_for_speed("super"), "usb-bus.2")
-        self.assertEqual(usbhost.bus_for_speed("full"), "usb-bus.1")
-        self.assertEqual(usbhost.bus_for_speed("low"), "usb-bus.1")
-        self.assertEqual(usbhost.bus_for_speed(""), "usb-bus.1")
+        self.assertEqual(usbhost.bus_for_speed("high"), "ehci.0")
+        self.assertEqual(usbhost.bus_for_speed("super"), "ehci.0")
+        self.assertEqual(usbhost.bus_for_speed("full"), "uhci.0")
+        self.assertEqual(usbhost.bus_for_speed("low"), "uhci.0")
+        self.assertEqual(usbhost.bus_for_speed(""), "uhci.0")
+
+    def test_tokens_add_the_ehci_once_and_only_for_high_speed(self):
+        self.assertEqual(usbhost.qemu_tokens([("0a12:0001", "full")]),
+                         ["-device", "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0"])
+        two = usbhost.qemu_tokens([("0e8d:1887", "high"), ("046d:0990", "super")])
+        self.assertEqual(two[:2], ["-device", "usb-ehci,id=ehci"])
+        self.assertEqual(two.count("usb-ehci,id=ehci"), 1)
+        self.assertEqual(len(two), 6)
+        self.assertEqual(usbhost.qemu_tokens([]), [])
 
 
 class Record(unittest.TestCase):
@@ -162,7 +171,7 @@ class Record(unittest.TestCase):
         self.assertTrue(any("only work on a Mac or on Windows" in w for w in warnings))
 
 
-QD = "/Applications/qemu-system-ppc64-G5-openbios"
+QD = "/Applications/q"
 MD = QD + "/Machines/Leopard"
 
 
@@ -174,21 +183,26 @@ class Launcher(unittest.TestCase):
 
     def test_usb_host_options(self):
         argv = command.build_argv(self.machine(), QD, MD, "darwin")
-        i = argv.index("usb-host,vendorid=0x0e8d,productid=0x1887,bus=usb-bus.2")
+        i = argv.index("usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0")
         self.assertEqual(argv[i - 1], "-device")
-        self.assertIn("usb-host,vendorid=0x0a12,productid=0x0001,bus=usb-bus.1", argv)
+        self.assertEqual(argv[i - 3:i - 1], ["-device", "usb-ehci,id=ehci"])
+        self.assertIn("usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0", argv)
         self.assertEqual(argv[-2:], ["-d", "guest_errors"])
-        for t in argv:
-            self.assertNotIn("usb-ehci", t)
-            self.assertNotIn("chardev", t)
+        # the controllers come before the devices that sit on them
+        self.assertLess(argv.index("piix3-usb-uhci,id=uhci"), argv.index(
+            "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0"))
+
+    def test_only_full_speed_devices_add_no_ehci(self):
+        m = Machine(name="L", usb_host_devices=[UsbHostDevice("0a12:0001", "BT", "full")])
+        self.assertNotIn("usb-ehci,id=ehci", command.build_argv(m, QD, MD, "darwin"))
 
     def test_devices_need_sudo_and_give_the_nvram_back(self):
         m = self.machine()
         self.assertTrue(command.needs_sudo(m, "darwin"))
         text = command.launcher_text(m, QD, MD, "darwin")
         self.assertIn("sudo -v", text)
-        self.assertIn(f"sudo {QD}/qemu-system-ppc64 \\", text)
-        self.assertIn('chown "${SUDO_USER:-$(id -un)}" nvram.img', text)
+        self.assertIn(f"sudo {QD}/qemu-system-x86_64 \\", text)
+        self.assertIn('chown "${SUDO_USER:-$(id -un)}" OVMF_VARS.fd serial.log', text)
         for word in ("usbhostd", "attach", "USBREDIR"):
             self.assertNotIn(word, text)
         r = subprocess.run(["/bin/bash", "-n"], input=text, text=True, capture_output=True)
@@ -202,8 +216,8 @@ class Launcher(unittest.TestCase):
     def test_windows_only_devices_qemu_owns(self):
         m = self.machine()
         self.assertFalse(command.needs_sudo(m, "win32"))
-        dvd = "usb-host,vendorid=0x0e8d,productid=0x1887,bus=usb-bus.2"
-        bt = "usb-host,vendorid=0x0a12,productid=0x0001,bus=usb-bus.1"
+        dvd = "usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0"
+        bt = "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0"
         # nothing known about ownership: nothing passed through
         argv = command.build_argv(m, r"C:\q", r"C:\m", "win32")
         self.assertNotIn("usb-host", " ".join(argv))
@@ -259,7 +273,7 @@ class EditorTab(unittest.TestCase):
 
     def editor(self, m: Machine):
         import tkinter as tk
-        from qemugui.g5_ui_machine import MachineEditor
+        from qemugui.x86_ui_machine import MachineEditor
         root = tk.Tk()
         root.withdraw()
         self.roots.append(root)

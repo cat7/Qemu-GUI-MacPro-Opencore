@@ -5,7 +5,7 @@ No Tk in here. Under user (slirp) networking the guest's connection to
 the server runs passive-only and advertises 10.0.2.2 to loopback clients.
 Under vmnet the guest connects to the host's own address instead.
 
-Filenames are UTF-8: the G5 runs Mac OS X only.
+Filenames are UTF-8: the guest is Mac OS X.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import warnings
 from pathlib import Path
 
 from . import paths
-from .g5_model import Machine, Share
+from .x86_model import Machine, Share
 
 GUEST_HOST_ADDR = "10.0.2.2"
 PORTS = (21, 2121)

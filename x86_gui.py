@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Qemu-system-ppc64 G5 Openbios GUI: start an emulated Power Mac G5 (PowerMac7,3).
+"""Qemu-system-x86_64 OpenCore GUI: start an emulated Intel Mac (Mac OS X 10.5).
 
-Runs from the folder that holds qemu-system-ppc64; machines live in a
+Runs from the folder that holds qemu-system-x86_64; machines live in a
 "Machines" folder next to it. Standard library only (tkinter).
 
-    python g5_gui.py
+    python x86_gui.py
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def main(argv=None, report_problem=None) -> int:
         report(NO_TKINTER)
         return EXIT_NO_TKINTER
 
-    from qemugui.g5_ui_main import MainWindow
+    from qemugui.x86_ui_main import MainWindow
     settings_file = paths.settings_path()
     app = MainWindow(paths.Settings.load(settings_file), settings_file)
     app.mainloop()

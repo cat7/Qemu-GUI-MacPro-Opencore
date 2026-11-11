@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "name": "Leopard",
+  "uuid": "11111111-2222-3333-4444-555555555555",
+  "mac_model": "MacPro2,1",
+  "os": "10.5",
+  "smp": 2,
+  "ram_mb": 3072,
+  "accel": "tcg",
+  "display": "cocoa",
+  "vnc": "",
+  "resolution": "1680x1050",
+  "show_picker": true,
+  "boot_args": "cpus=1",
+  "serial_log": true,
+  "drives": [
+    {"kind": "disk", "file": "/images/leopard.qcow2", "format": "qcow2"},
+    {"kind": "cdrom", "file": "/images/10.5.iso", "format": "raw"},
+    null,
+    null,
+    null
+  ],
+  "network": {"mode": "user", "mac": "52:54:00:12:34:56"},
+  "usb_tablet": true,
+  "usb_audio": true,
+  "usb_host_devices": [],
+  "share": {"folder": "", "user": "guest", "password": "", "scope": "guest-only", "ftp": false},
+  "rtc_base": "",
+  "extra_args": "",
+  "notes": ""
+}

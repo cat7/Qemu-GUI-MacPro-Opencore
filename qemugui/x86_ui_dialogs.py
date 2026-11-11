@@ -1,9 +1,9 @@
-"""The small windows for the G5 editor: the name for a duplicate, the
+"""The small windows for the machine editor: the name for a duplicate, the
 delete confirmation, Reset NVRAM, and create a disk. A new machine is not
 one of them -- it opens the settings window straight away.
 
-Reset NVRAM deletes the machine folder's ``nvram.img`` and nothing else;
-QEMU makes a fresh one at the next start (see :mod:`qemugui.g5_model`).
+Reset NVRAM deletes the machine folder's ``OVMF_VARS.fd`` and nothing else;
+the next launcher write copies a fresh one from the firmware.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, messagebox, simpledialog
 
-from . import g5_model as model
+from . import x86_model as model
 from . import paths
 from . import optical
 
@@ -57,7 +57,7 @@ def _bullets(files: list[str], limit: int = 20) -> str:
 
 def confirm_delete(parent, name: str, will_go: list[str], will_stay: list[str],
                    folder: Path) -> bool:
-    """Delete removes the record, the launcher and the saved NVRAM. Disk
+    """Delete removes the record, the launcher, the OpenCore disk and the saved NVRAM. Disk
     images are never deleted; the window lists both sides before anything
     happens."""
     text = f"Remove “{name}”?"
@@ -70,9 +70,8 @@ def confirm_delete(parent, name: str, will_go: list[str], will_stay: list[str],
 
 def confirm_reset_saved_settings(parent, name: str) -> bool:
     """The NVRAM holds what the Mac saved for itself -- the startup disk
-    chosen in Mac OS X, a setenv at the Open Firmware prompt -- so it asks
-    first. The next start makes a fresh NVRAM from the Advanced tab's
-    Open Firmware settings."""
+    chosen in Mac OS X, the OpenCore variables -- so it asks first. The
+    next start copies a fresh one from the firmware."""
     text = "You are about to delete what this Mac saved for itself last time."
     return messagebox.askyesno("Reset NVRAM", text, icon="warning",
                                default="no", parent=parent)
@@ -131,8 +130,7 @@ class CreateDiskDialog(simpledialog.Dialog):
         ttk.Label(master, text="Put it in:").grid(row=r, column=0, sticky="w", padx=4, pady=3)
         self.choices: list[tuple[str, int | None]] = [("Nowhere", None)]
         for i in range(len(model.DRIVE_SLOTS)):
-            if "disk" in model.slot_kinds(i):
-                self.choices.append((f"{model.slot_name(i)} — {self.machine.slot_status(i)}", i))
+            self.choices.append((f"{model.slot_name(i)} — {self.machine.slot_status(i)}", i))
         free = self.machine.first_unfilled_disk_slot()
         self.place_var = tk.StringVar(
             value=next((c[0] for c in self.choices if c[1] == free and free is not None),

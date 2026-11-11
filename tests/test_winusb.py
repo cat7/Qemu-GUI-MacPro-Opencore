@@ -15,11 +15,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE))
+
+import support  # noqa: E402
 
 from qemugui import winusb as wl  # noqa: E402
 from qemugui import paths  # noqa: E402
-from qemugui import g5_model as model  # noqa: E402
-from qemugui.g5_model import Machine, UsbHostDevice  # noqa: E402
+from qemugui import x86_model as model  # noqa: E402
+from qemugui.x86_model import Machine, UsbHostDevice  # noqa: E402
 
 LIST = r'''
 {"op":"list","warnings":[]}
@@ -121,7 +124,7 @@ class Ownership(unittest.TestCase):
 
 
 class Helper(unittest.TestCase):
-    """winusb-switch.exe beside qemu-system-ppc64.exe: list unelevated, bind
+    """winusb-switch.exe beside qemu-system-x86_64.exe: list unelevated, bind
     and unbind through the UAC prompt with the result in a file."""
 
     def setUp(self):
@@ -151,7 +154,7 @@ class Helper(unittest.TestCase):
     def test_missing_helper(self):
         devs, why = wl.list_devices()
         self.assertEqual(devs, [])
-        self.assertIn("winusb-switch.exe is not next to qemu-system-ppc64.exe", why)
+        self.assertIn("winusb-switch.exe is not next to qemu-system-x86_64.exe", why)
         res = wl.run_elevated("bind", "046d:0990")
         self.assertFalse(res["ok"])
         self.assertIn("not next to", wl.outcome_text(res))
@@ -238,7 +241,7 @@ class WindowsEditorTab(unittest.TestCase):
 
     def editor(self, m: Machine):
         import tkinter as tk
-        from qemugui.g5_ui_machine import MachineEditor
+        from qemugui.x86_ui_machine import MachineEditor
         root = tk.Tk()
         root.withdraw()
         self.roots.append(root)
@@ -364,11 +367,12 @@ class WindowsMainWindowCommandLine(unittest.TestCase):
     asking winusb-switch each time."""
 
     def setUp(self):
-        from qemugui import g5_ui_main as ui
+        from qemugui import x86_ui_main as ui
         self.ui = ui
         self.td = tempfile.TemporaryDirectory()
         self.saved = (paths.HOST_PLATFORM, wl.list_devices)
         paths.HOST_PLATFORM = "win32"
+        support.make_install(self.td.name)
         paths.use_install_dir(self.td.name)
         self.listing = (wl.parse_list(LIST), "")
         wl.list_devices = lambda folder=None: self.listing

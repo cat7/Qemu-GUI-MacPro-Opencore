@@ -1,5 +1,5 @@
-"""The G5 main window: the list of machines, the command line Start will
-run, and Start.
+"""The main window: the list of machines, the SMC key file, the command line
+Start will run, and Start.
 """
 
 from __future__ import annotations
@@ -8,18 +8,18 @@ import subprocess
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
-from . import g5_command as command
-from . import g5_model as model
-from . import g5_share as share
+from . import x86_command as command
+from . import x86_model as model
+from . import x86_share as share
 from . import paths
 from . import winusb
-from .g5_model import Machine, Library
+from .x86_model import Machine, Library
 from .paths import Settings
-from .g5_ui_dialogs import (ask_name, confirm_delete, confirm_reset_saved_settings, open_folder,
+from .x86_ui_dialogs import (ask_name, confirm_delete, confirm_reset_saved_settings, open_folder,
                                refresh_native_style)
-from .g5_ui_machine import MachineEditor
+from .x86_ui_machine import MachineEditor
 
 APP_TITLE = paths.APP_NAME
 LOG_NAME = "last-run.log"
@@ -70,7 +70,8 @@ class RunningMachine:
 TERMINAL_STATUS = "Started in Terminal"
 
 
-def start_in_terminal(m: Machine, machine_dir: Path) -> tuple[Path, share.ShareServer | None]:
+def start_in_terminal(m: Machine, machine_dir: Path,
+                      key_file: str | None = None) -> tuple[Path, share.ShareServer | None]:
     """On macOS a QEMU child of this application runs with reduced display
     performance and without microphone access; a Terminal-launched run has
     neither problem, and Terminal is also the only place a vmnet run can ask
@@ -78,7 +79,7 @@ def start_in_terminal(m: Machine, machine_dir: Path) -> tuple[Path, share.ShareS
     folder stays up until the next start or quit."""
     machine_dir = Path(machine_dir)
     machine_dir.mkdir(parents=True, exist_ok=True)
-    launcher, _argv = command.write_launcher(m, qemu_dir(), str(machine_dir))
+    launcher, _argv = command.write_launcher(m, qemu_dir(), str(machine_dir), key_file=key_file)
     share_server = share.start_share(m) if m.share.ftp_on else None
     try:
         subprocess.Popen(["open", "-a", "Terminal", str(launcher)], cwd=str(machine_dir))
@@ -98,15 +99,15 @@ def usb_owned(m: Machine) -> tuple[set | None, str]:
     return owned, winusb.passthrough_note([u.id for u in m.usb_host_devices], owned, why)
 
 
-def start_machine(m: Machine, machine_dir: Path) -> RunningMachine:
+def start_machine(m: Machine, machine_dir: Path, key_file: str | None = None) -> RunningMachine:
     """Write the launcher, start the shared folder, then run the launcher
     with the machine folder as the working directory, keeping everything
-    it prints in last-run.log."""
+    it prints in last-run.log. The launcher reads the SMC key file itself."""
     machine_dir = Path(machine_dir)
     machine_dir.mkdir(parents=True, exist_ok=True)
     owned, _note = usb_owned(m)
     launcher, argv = command.write_launcher(m, qemu_dir(), str(machine_dir), paths.HOST_PLATFORM,
-                                            owned)
+                                            owned, key_file)
     log_path = machine_dir / LOG_NAME
     log_path.write_text("# " + " ".join(argv) + "\n", encoding="utf-8")
     windows = paths.is_windows(paths.HOST_PLATFORM)
@@ -127,8 +128,9 @@ def start_machine(m: Machine, machine_dir: Path) -> RunningMachine:
             proc = subprocess.Popen(["cmd.exe", "/c", str(launcher)], cwd=str(machine_dir),
                                     creationflags=CREATE_NEW_CONSOLE)
         else:
-            proc = subprocess.Popen(argv, cwd=str(machine_dir), stdout=log_fh,
-                                    stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            proc = subprocess.Popen(["/bin/bash", str(launcher)], cwd=str(machine_dir),
+                                    stdout=log_fh, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL)
     except OSError:
         if share_server:
             share_server.stop()
@@ -151,7 +153,7 @@ class MainWindow(tk.Tk):
         self.terminal_started: dict[str, float] = {}
         self.terminal_shares: dict[str, share.ShareServer] = {}
         self.title(APP_TITLE)
-        self.geometry("1100x680")
+        self.geometry("1100x720")
         self.minsize(880, 520)
         self.notes_name: str | None = None
         self._build()
@@ -168,6 +170,16 @@ class MainWindow(tk.Tk):
         filem.add_command(label="Quit", command=self._quit)
         menubar.add_cascade(label="File", menu=filem)
         self.config(menu=menubar)
+
+        keybar = ttk.Frame(self)
+        keybar.pack(side="bottom", fill="x", padx=8, pady=(0, 8))
+        ttk.Label(keybar, text="SMC key file").pack(side="left")
+        self.key_var = tk.StringVar(value=self.settings.key_file)
+        self.key_entry = ttk.Entry(keybar, textvariable=self.key_var)
+        self.key_entry.pack(side="left", fill="x", expand=True, padx=6)
+        self.key_entry.bind("<FocusOut>", lambda _e: self.key_file_changed())
+        self.key_entry.bind("<Return>", lambda _e: self.key_file_changed())
+        ttk.Button(keybar, text="Browse…", command=self.browse_key_file).pack(side="left")
 
         pane = ttk.PanedWindow(self, orient="horizontal")
         pane.pack(fill="both", expand=True, padx=8, pady=(8, 4))
@@ -219,6 +231,25 @@ class MainWindow(tk.Tk):
         self.notes = tk.Text(right, height=6, wrap="word")
         self.notes.pack(fill="x")
         self.notes.bind("<FocusOut>", lambda _e: self.save_notes())
+
+    def key_file(self) -> str:
+        return self.key_var.get().strip() or str(paths.default_smc_key_file())
+
+    def key_file_changed(self):
+        """The path is a setting of the program; the key stays in the file."""
+        value = self.key_var.get().strip()
+        default = str(paths.default_smc_key_file())
+        self.settings.smc_key_file = "" if value in ("", default) else value
+        self._save_settings()
+        self.refresh_details()
+
+    def browse_key_file(self):
+        start = paths.browse_start_dir(self.key_file(), paths.install_dir())
+        f = filedialog.askopenfilename(parent=self, initialdir=str(start),
+                                       filetypes=[("Text files", "*.txt"), ("Every file", "*")])
+        if f:
+            self.key_var.set(f)
+            self.key_file_changed()
 
     @staticmethod
     def _mono(size: int):
@@ -306,7 +337,7 @@ class MainWindow(tk.Tk):
         owned, note = usb_owned(m)
         try:
             text = command.launcher_text(m, qemu_dir(), str(folder), paths.HOST_PLATFORM,
-                                         owned)
+                                         owned, self.key_file())
         except Exception as e:
             text = f"({e})"
         if note:
@@ -411,13 +442,13 @@ class MainWindow(tk.Tk):
         try:
             owned, _note = usb_owned(m)
             command.write_launcher(m, qemu_dir(), str(self.library.folder(m.name)),
-                                   paths.HOST_PLATFORM, owned)
+                                   paths.HOST_PLATFORM, owned, self.key_file())
         except OSError as e:
             messagebox.showerror(APP_TITLE, f"The start-up file could not be written.\n\n{e}")
 
     def reset_nvram(self):
-        """Deletes the machine folder's nvram.img, which QEMU keeps there;
-        the next start makes a fresh one."""
+        """Deletes the machine folder's OVMF_VARS.fd, the machine's NVRAM;
+        the next start copies a fresh one from the firmware."""
         name = self.selected_name()
         if not name:
             return
@@ -455,7 +486,7 @@ class MainWindow(tk.Tk):
             messagebox.showwarning("Start", f"“{m.name}” is already running.")
             return None
         errors, _warnings = model.validate(m, qemu_dir(), machine_dir=str(self.library.folder(m.name)))
-        errors += model.start_blockers(m)
+        errors += model.start_blockers(m, self.key_file())
         if errors:
             messagebox.showerror("Start", "\n".join(f"• {e}" for e in errors))
             return None
@@ -465,7 +496,8 @@ class MainWindow(tk.Tk):
         if paths.HOST_PLATFORM == "darwin":
             self._stop_terminal_share(m.name)
             try:
-                _launcher, share_server = start_in_terminal(m, self.library.folder(m.name))
+                _launcher, share_server = start_in_terminal(m, self.library.folder(m.name),
+                                                                self.key_file())
             except share.ShareError as e:
                 messagebox.showerror("Start", f"The shared folder could not be started.\n\n{e}")
                 return None
@@ -479,7 +511,7 @@ class MainWindow(tk.Tk):
             self.refresh_list(select=m.name)
             return None
         try:
-            r = start_machine(m, self.library.folder(m.name))
+            r = start_machine(m, self.library.folder(m.name), self.key_file())
         except share.ShareError as e:
             messagebox.showerror("Start", f"The shared folder could not be started.\n\n{e}")
             return None

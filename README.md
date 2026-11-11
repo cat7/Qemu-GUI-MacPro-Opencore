@@ -1,11 +1,37 @@
-# Qemu-system-ppc64 G5 Openbios GUI
+# Qemu-system-x86_64 OpenCore GUI
 
-A portable launcher for the Power Mac G5 (PowerMac7,3) machine of
-`qemu-system-ppc64`, branch `G5-openbios` of github.com/cat7/qemu, with the
-OpenBIOS of branch `G5-openbios` of github.com/cat7/openbios. The program
-must sit in the same folder as `qemu-system-ppc64`, `openbios-qemu.elf`
-and `pc-bios/` (and `qemu-img` for making new disks). The graphics card
-ROMs (`*.rom`) are picked from that folder.
+A portable launcher for Intel Mac OS X 10.5 (Leopard, 32-bit kernel) on
+`qemu-system-x86_64`: QEMU q35 with OVMF and OpenCore, presenting as a Mac
+Pro. Target QEMU: branch `x86-opencore` of github.com/cat7/qemu.
+
+Machines are kept in a `Machines` folder beside the program, one folder
+each, as `machine.json`. `run.command` (macOS) or `run.bat` (Windows) is
+generated from that record every time it is saved or started. The OpenCore
+boot disk (`esp/` and `esp.img`) is regenerated from the record at the same
+time; `OVMF_VARS.fd` is the machine's NVRAM, copied from
+`pc-bios/edk2-i386-vars.fd` once and never overwritten.
+
+## Install folder
+
+The program sits in the folder that holds:
+
+    qemu-system-x86_64[.exe]
+    qemu-img[.exe]                 (for making new disks)
+    winusb-switch.exe              (Windows, host USB devices)
+    pc-bios/edk2-x86_64-code.fd
+    pc-bios/edk2-i386-vars.fd
+    OpenCore/                      an unpacked OpenCore release:
+        X64/EFI/BOOT/BOOTx64.efi
+        X64/EFI/OC/OpenCore.efi
+        X64/EFI/OC/Drivers/*.efi   (OpenRuntime, OpenHfsPlus,
+                                    OpenPartitionDxe, ResetNvramEntry)
+        X64/EFI/OC/Tools/OpenShell.efi
+        Docs/Sample.plist
+    Kexts/                         optional; every *.kext folder is injected
+    OSK-Key.txt                    SMC key file (path is a setting)
+
+The SMC key file is one line of exactly 64 printable characters. The key is
+read by the launcher each time it runs and is stored nowhere else.
 
 ## Requirements
 
@@ -16,60 +42,21 @@ ROMs (`*.rom`) are picked from that folder.
 
 ## Run from source
 
-    python g5_gui.py
+    python x86_gui.py
 
-## Shared folder
+## Build
 
-Each machine can share one host folder while it runs, over FTP, as a
-volume, or both (neither is on until ticked).
-
-"Serve over FTP": with the default (slirp) network the Mac reaches it at
-`ftp://10.0.2.2/` (`:2121` when port 21 is taken); with vmnet choose "All
-interfaces", set a password, and use the host's own address.
-
-"Mac OS X volume (virtio-9p)" attaches the folder through a virtio-9p
-card, for Mac OS X 10.4 and 10.5 with osx9p installed (its CD image is
-built from github.com/cat7/osx9p). The folder appears in the Finder under
-the volume name, with file types and resource forks kept.
-
-## Host USB devices (macOS)
-
-A machine can use USB devices plugged into the Mac (a camera, a DVD
-writer): tick them in the machine's settings, USB devices tab. QEMU can
-take a device from macOS only as root, so a machine with devices ticked
-starts with `sudo` and asks for your password in Terminal, as vmnet does.
-High-speed devices go on the USB 2.0 bus, others on the second USB 1.1
-bus; a device that is not plugged in at start is taken when it is plugged
-in. Keyboards, mice and disks with a mounted volume are never offered (a
-DVD drive with a mounted disc is fine). A device goes back to macOS when
-the machine quits.
-
-## Host USB devices (Windows)
-
-QEMU can use a device only while it is on Windows' WinUSB driver. In the
-USB devices tab, Give to QEMU moves it there and Give back to Windows
-returns it (one administrator prompt each; `winusb-switch.exe` must sit
-next to `qemu-system-ppc64.exe`). QEMU itself runs without elevation.
-
-## Build on macOS
-
-With the python.org framework Python (Homebrew's Python has no tkinter):
+macOS, with the python.org framework Python (Homebrew's Python has no
+tkinter):
 
     /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 \
-        -m PyInstaller --noconfirm G5GUI.spec
+        -m PyInstaller --noconfirm X86GUI.spec
 
-Result: `dist/Qemu-system-ppc64 G5 Openbios GUI.app`, arm64. Set
-`QEMUGUI_TARGET_ARCH=universal2` (or `x86_64`) for another architecture.
+Windows, a single `.exe`:
 
-## Build on Windows
+    python -m PyInstaller --noconfirm X86GUI.spec
 
-    py -m PyInstaller --noconfirm G5GUI.spec
-
-Result: a single windowed executable, `dist/Qemu-system-ppc64 G5 Openbios GUI.exe`.
-Put it alongside `qemu-system-ppc64.exe`.
-
-USB switch helper, from `winusb/` with a 64-bit mingw-w64 cross compiler:
-`x86_64-w64-mingw32-gcc -O2 -Wall -municode -o winusb-switch.exe winusb-switch.c -lsetupapi -lcfgmgr32 -lcrypt32 -lwintrust`
+Put the result in the install folder.
 
 ## Tests
 

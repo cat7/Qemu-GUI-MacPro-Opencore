@@ -1,4 +1,4 @@
-"""The G5 machine editor: Machine, Display, Drives, Network & sound,
+"""The machine editor: Machine, Drives, Display & boot, Network, USB devices,
 Shared folder, Advanced.
 
 * Nothing is ever filled in for you. Every field that names a file starts
@@ -17,23 +17,16 @@ from tkinter import ttk, filedialog, messagebox
 from . import paths
 from . import usbhost
 from . import winusb
-from . import g5_model as model
-from .g5_model import Machine, Drive, Gpu, Network, PromEnv, Share, UsbHostDevice
-from .g5_ui_dialogs import (show_validation, refresh_native_style, CreateDiskDialog,
+from . import x86_model as model
+from .x86_model import Machine, Drive, Network, Share, UsbHostDevice
+from .x86_ui_dialogs import (show_validation, refresh_native_style, CreateDiskDialog,
                             HostDriveDialog)
 
 KIND_LABELS = {"": "Empty", "disk": "Hard disk", "cdrom": "CD"}
 KIND_BY_LABEL = {v: k for k, v in KIND_LABELS.items()}
 IMAGE_TYPES = [("Hard disks and CDs", "*.img *.dsk *.qcow2 *.iso *.toast *.cdr *.dmg *.cue"),
                ("Every file", "*")]
-ROM_TYPES = [("ROM files", "*.rom *.ROM"), ("Every file", "*")]
-BIOS_TYPES = [("OpenBIOS", "*.elf openbios*"), ("Every file", "*")]
 CDROM_EXTS = {".iso", ".toast", ".cdr", ".dmg", ".cue"}
-
-NO_GPU = "vga"
-GPU_CHOICES = ((NO_GPU, "The machine's own (std VGA)"),
-               ("radeon9800", model.GPU_LABELS["radeon9800"]),
-               ("rv100", model.GPU_LABELS["rv100"]))
 
 GREY = "gray"
 EDITOR_WIDTH = 780
@@ -46,17 +39,6 @@ def browse_file(parent, var: tk.StringVar, filetypes, fallback: Path | str | Non
         var.set(f)
         return f
     return ""
-
-
-def rom_value(path: str, qemu_dir: str) -> str:
-    """A ROM beside the emulator is kept by name, anything else by path."""
-    p = Path(path)
-    try:
-        if qemu_dir and p.parent.resolve() == Path(qemu_dir).resolve():
-            return p.name
-    except OSError:
-        pass
-    return path
 
 
 class FilePicker:
@@ -88,19 +70,15 @@ class FilePicker:
 
 
 class DriveRow:
-    """One drive position: what is in it, which file it is, and whether it
-    is the marked boot drive ("Boot" -- mutually exclusive across rows,
-    wired by whoever creates them via ``on_boot``)."""
+    """One drive position: what is in it, which file it is, and its format."""
 
-    def __init__(self, master, row: int, slot: int, fallback=None, on_boot=None):
+    def __init__(self, master, row: int, slot: int, fallback=None):
         self.slot = slot
         self.fallback = fallback
-        self.on_boot = on_boot
         self.kinds = model.slot_kinds(slot)
         self.kind = tk.StringVar(value=KIND_LABELS[""])
         self.file = tk.StringVar()
         self.format = tk.StringVar(value="raw")
-        self.boot = tk.BooleanVar(value=False)
         ttk.Label(master, text=model.slot_name(slot)).grid(row=row, column=0, sticky="w",
                                                            padx=(0, 4), pady=1)
         self.kind_cb = ttk.Combobox(master, textvariable=self.kind, state="readonly", width=9,
@@ -113,11 +91,8 @@ class DriveRow:
         self.file.trace_add("write", lambda *_a: self._infer_kind())
         ttk.Combobox(master, textvariable=self.format, values=model.DRIVE_FORMATS, state="readonly",
                      width=6).grid(row=row, column=3, padx=2)
-        ttk.Checkbutton(master, text="Boot", variable=self.boot,
-                        command=self._boot_toggled).grid(row=row, column=4, padx=(6, 0))
-        if "cdrom" in self.kinds:
-            ttk.Button(master, text="Host drive…", width=11,
-                       command=self._pick_host_drive).grid(row=row, column=5, padx=(6, 0))
+        ttk.Button(master, text="Host drive…", width=11,
+                   command=self._pick_host_drive).grid(row=row, column=4, padx=(6, 0))
 
     def _pick_host_drive(self):
         dlg = HostDriveDialog(self.picker.entry.winfo_toplevel(), current=self.file.get())
@@ -134,9 +109,6 @@ class DriveRow:
     def _infer_kind(self):
         if KIND_BY_LABEL[self.kind.get()] or not self.file.get().strip():
             return
-        if len(self.kinds) == 1:
-            self.kind.set(KIND_LABELS[self.kinds[0]])
-            return
         ext = Path(self.file.get().strip()).suffix.lower()
         self.kind.set(KIND_LABELS["cdrom" if ext in CDROM_EXTS else "disk"])
 
@@ -144,11 +116,6 @@ class DriveRow:
         if not KIND_BY_LABEL[self.kind.get()]:
             self.file.set("")
             self.format.set("raw")
-            self.boot.set(False)
-
-    def _boot_toggled(self):
-        if self.boot.get() and self.on_boot:
-            self.on_boot(self)
 
     def set_drive(self, d: Drive | None):
         self.kind.set(KIND_LABELS.get(d.kind if d else "", KIND_LABELS[""]))
@@ -187,14 +154,11 @@ class MachineEditor(tk.Toplevel):
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=6, pady=6)
         self._build_machine()
-        self._build_display()
         self._build_drives()
-        self._build_net_audio()
+        self._build_display()
+        self._build_network()
+        self._build_usb()
         self._build_share()
-        if paths.HOST_PLATFORM == "darwin":
-            self._build_usb_host()
-        elif paths.is_windows(paths.HOST_PLATFORM):
-            self._build_usb_host_win()
         self._build_advanced()
 
         bar = ttk.Frame(self)
@@ -250,43 +214,34 @@ class MachineEditor(tk.Toplevel):
         self.name_entry = ttk.Entry(f, textvariable=self.name_var, width=40)
         self.name_entry.grid(row=r, column=1, sticky="ew", pady=4)
         r += 1
+        ttk.Label(f, text="Mac model:").grid(row=r, column=0, sticky="w", pady=4)
+        self.model_var = tk.StringVar()
+        ttk.Combobox(f, textvariable=self.model_var, values=list(model.MAC_MODELS),
+                     state="readonly", width=14).grid(row=r, column=1, sticky="w", pady=4)
+        r += 1
+        ttk.Label(f, text="Mac OS X:").grid(row=r, column=0, sticky="w", pady=4)
+        self.os_var = tk.StringVar()
+        ttk.Combobox(f, textvariable=self.os_var, values=list(model.OS_VERSIONS),
+                     state="readonly", width=14).grid(row=r, column=1, sticky="w", pady=4)
+        r += 1
+        ttk.Label(f, text="Processors:").grid(row=r, column=0, sticky="w", pady=4)
+        self.smp_var = tk.StringVar()
+        ttk.Combobox(f, textvariable=self.smp_var, values=[str(x) for x in model.SMP_CHOICES],
+                     state="readonly", width=14).grid(row=r, column=1, sticky="w", pady=4)
+        r += 1
         ttk.Label(f, text="Memory (MB):").grid(row=r, column=0, sticky="w", pady=4)
         self.ram_var = tk.StringVar()
         ttk.Combobox(f, textvariable=self.ram_var, values=[str(x) for x in model.RAM_CHOICES],
-                     width=10).grid(row=r, column=1, sticky="w", pady=4)
+                     state="readonly", width=14).grid(row=r, column=1, sticky="w", pady=4)
         r += 1
-        ttk.Label(f, text="CPUs:").grid(row=r, column=0, sticky="w", pady=4)
-        self.smp_var = tk.StringVar()
-        ttk.Spinbox(f, textvariable=self.smp_var, from_=model.SMP_MIN, to=model.SMP_MAX,
-                    width=5).grid(row=r, column=1, sticky="w", pady=4)
-        r += 1
-        self.decr_cap_var = tk.BooleanVar()
-        ttk.Checkbutton(f, text=f"Kick idle CPUs every {model.DECR_CAP_MS} ms",
-                        variable=self.decr_cap_var).grid(row=r, column=1, sticky="w")
-        r += 1
-        ttk.Label(f, text="For Mac OS X on more than 4 CPUs: avoids Tiger's boot stall "
-                          "and a Leopard panic.",
-                  foreground=GREY).grid(row=r, column=0, columnspan=3, sticky="w")
-        r += 1
-        ttk.Label(f, text="OpenBIOS:").grid(row=r, column=0, sticky="w", pady=4)
-        self.bios_var = tk.StringVar(value=model.FIRMWARE_FILE)
-        self.bios_cb = ttk.Combobox(f, textvariable=self.bios_var, width=40,
-                                    values=model.bios_in(self.qemu_dir))
-        self.bios_cb.grid(row=r, column=1, sticky="ew", padx=2, pady=4)
-        ttk.Button(f, text="Choose…", command=self._choose_bios).grid(
-            row=r, column=2, sticky="w", padx=4, pady=4)
-
-    def _choose_bios(self):
-        current = self.bios_var.get().strip()
-        if current and not Path(current).is_absolute():
-            current = paths.join_path(self.qemu_dir, current)
-        start = paths.browse_start_dir(current, self.qemu_dir)
-        f = filedialog.askopenfilename(parent=self, initialdir=str(start), filetypes=BIOS_TYPES)
-        if f:
-            self.bios_var.set(rom_value(f, self.qemu_dir))
+        ttk.Label(f, text="Acceleration:").grid(row=r, column=0, sticky="w", pady=4)
+        self.accel_var = tk.StringVar()
+        self.accel_cb = ttk.Combobox(f, textvariable=self.accel_var, state="readonly", width=24,
+                                     values=model.accel_labels_for_host(paths.HOST_PLATFORM))
+        self.accel_cb.grid(row=r, column=1, sticky="w", pady=4)
 
     def _build_display(self):
-        f = self._tab("Display")
+        f = self._tab("Display & boot")
         f.columnconfigure(1, weight=1)
         self.display_var = tk.StringVar()
         displays = model.DISPLAYS.get("win32" if paths.is_windows(paths.HOST_PLATFORM)
@@ -295,55 +250,6 @@ class MachineEditor(tk.Toplevel):
         ttk.Label(f, text="Display:").grid(row=r, column=0, sticky="w", pady=(0, 8))
         ttk.Combobox(f, textvariable=self.display_var, values=list(displays), state="readonly",
                      width=10).grid(row=r, column=1, sticky="w", pady=(0, 8))
-        r += 1
-        ttk.Label(f, text="Graphics card", font=("", 0, "bold")).grid(
-            row=r, column=0, columnspan=3, sticky="w", pady=(6, 4))
-        r += 1
-        self.gpu_model_var = tk.StringVar(value=NO_GPU)
-        for value, label in GPU_CHOICES:
-            ttk.Radiobutton(f, text=label, variable=self.gpu_model_var, value=value,
-                            command=self._gpu_changed).grid(row=r, column=0, columnspan=3,
-                                                            sticky="w")
-            r += 1
-        ttk.Label(f, text="ROM:").grid(row=r, column=0, sticky="w", pady=(6, 0))
-        self.gpu_rom_var = tk.StringVar()
-        self.gpu_rom_cb = ttk.Combobox(f, textvariable=self.gpu_rom_var, width=40,
-                                       values=model.roms_in(self.qemu_dir))
-        self.gpu_rom_cb.grid(row=r, column=1, sticky="ew", padx=2, pady=(6, 0))
-        self.gpu_rom_button = ttk.Button(f, text="Choose…", command=self._choose_rom)
-        self.gpu_rom_button.grid(row=r, column=2, sticky="w", padx=4, pady=(6, 0))
-        r += 1
-        ttk.Label(f, text="OpenGL:").grid(row=r, column=0, sticky="w", pady=(6, 0))
-        self.gl_var = tk.StringVar(value="off")
-        self.gl_cb = ttk.Combobox(f, textvariable=self.gl_var, values=list(model.GL_MODES),
-                                  state="readonly", width=8)
-        self.gl_cb.grid(row=r, column=1, sticky="w", padx=2, pady=(6, 0))
-        r += 1
-        ttk.Label(f, text="Radeon 9800 only. off: software; on: host OpenGL, exact; "
-                          "fast: host OpenGL, fastest.",
-                  foreground=GREY).grid(row=r, column=0, columnspan=3, sticky="w")
-        r += 1
-        ttk.Label(f, text="Raster threads:").grid(row=r, column=0, sticky="w", pady=(6, 0))
-        self.raster_var = tk.StringVar(value="0")
-        self.raster_sb = ttk.Spinbox(f, textvariable=self.raster_var, from_=model.RASTER_MIN,
-                                     to=model.RASTER_MAX, width=5)
-        self.raster_sb.grid(row=r, column=1, sticky="w", padx=2, pady=(6, 0))
-        r += 1
-        ttk.Label(f, text="0: automatic (half the host's cores, at most 8); 1: one thread.",
-                  foreground=GREY).grid(row=r, column=0, columnspan=3, sticky="w")
-        r += 1
-        ttk.Label(f, text="Engine thread:").grid(row=r, column=0, sticky="w", pady=(6, 0))
-        self.async_var = tk.StringVar(value="auto")
-        self.async_cb = ttk.Combobox(f, textvariable=self.async_var,
-                                     values=list(model.ASYNC_MODES), state="readonly", width=8)
-        self.async_cb.grid(row=r, column=1, sticky="w", padx=2, pady=(6, 0))
-        r += 1
-        self.agp_var = tk.BooleanVar(value=True)
-        self.agp_cb = ttk.Checkbutton(f, text="AGP (Radeon 7000 only)", variable=self.agp_var)
-        self.agp_cb.grid(row=r, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        r += 1
-
-        ttk.Separator(f).grid(row=r, column=0, columnspan=3, sticky="ew", pady=10)
         r += 1
         self.vnc_on = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="Show this Mac's screen over VNC instead",
@@ -354,23 +260,33 @@ class MachineEditor(tk.Toplevel):
         self.vnc_var = tk.StringVar()
         self.vnc_entry = ttk.Entry(f, textvariable=self.vnc_var, width=16)
         self.vnc_entry.grid(row=r, column=1, sticky="w", pady=(6, 0))
-
-    def _choose_rom(self):
-        current = self.gpu_rom_var.get().strip()
-        if current and not Path(current).is_absolute():
-            current = paths.join_path(self.qemu_dir, current)
-        start = paths.browse_start_dir(current, self.qemu_dir)
-        f = filedialog.askopenfilename(parent=self, initialdir=str(start), filetypes=ROM_TYPES)
-        if f:
-            self.gpu_rom_var.set(rom_value(f, self.qemu_dir))
-
-    def _gpu_changed(self, _e=None):
-        gpu = self.gpu_model_var.get()
-        on = ["!disabled"] if gpu != NO_GPU else ["disabled"]
-        for w in (self.gpu_rom_cb, self.gpu_rom_button, self.raster_sb, self.async_cb):
-            w.state(on)
-        self.gl_cb.state(["!disabled"] if gpu == "radeon9800" else ["disabled"])
-        self.agp_cb.state(["!disabled"] if gpu == "rv100" else ["disabled"])
+        r += 1
+        ttk.Separator(f).grid(row=r, column=0, columnspan=3, sticky="ew", pady=10)
+        r += 1
+        ttk.Label(f, text="Screen size at boot:").grid(row=r, column=0, sticky="w", pady=4)
+        self.resolution_var = tk.StringVar()
+        ttk.Combobox(f, textvariable=self.resolution_var, values=list(model.RESOLUTIONS),
+                     state="readonly", width=12).grid(row=r, column=1, sticky="w", pady=4)
+        r += 1
+        self.picker_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Show the boot picker at start",
+                        variable=self.picker_var).grid(row=r, column=0, columnspan=3,
+                                                       sticky="w", pady=(6, 0))
+        r += 1
+        ttk.Label(f, text="Extra kernel arguments:").grid(row=r, column=0, sticky="w", pady=(6, 0))
+        self.boot_args_var = tk.StringVar()
+        ttk.Entry(f, textvariable=self.boot_args_var, width=40).grid(
+            row=r, column=1, sticky="ew", pady=(6, 0))
+        r += 1
+        ttk.Label(f, text="Added after keepsyms=1 debug=0x100. -v is not allowed: the Mac OS X "
+                          "10.5 boot loader crashes with it.",
+                  foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
+            row=r, column=0, columnspan=3, sticky="w")
+        r += 1
+        self.serial_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Write a serial log (serial.log in the machine folder)",
+                        variable=self.serial_var).grid(row=r, column=0, columnspan=3,
+                                                       sticky="w", pady=(10, 0))
 
     def _vnc_changed(self, _e=None):
         if self.vnc_on.get():
@@ -386,17 +302,15 @@ class MachineEditor(tk.Toplevel):
         rows = ttk.Frame(f)
         rows.grid(row=0, column=0, sticky="ew")
         rows.columnconfigure(2, weight=1)
-        for c, h in enumerate(("Position", "", "", "Format", "", "")):
+        for c, h in enumerate(("Position", "", "", "Format", "")):
             ttk.Label(rows, text=h, foreground=GREY).grid(row=0, column=c, sticky="w", padx=4)
-        self.drive_rows = [DriveRow(rows, 1 + i, i, fallback=self.machine_folder,
-                                    on_boot=self._boot_row_toggled)
+        self.drive_rows = [DriveRow(rows, 1 + i, i, fallback=self.machine_folder)
                            for i in range(len(model.DRIVE_SLOTS))]
-        ttk.Label(f, text="The ATA-100 holds the CD drives and at most one hard disk "
-                          "(master); SATA holds hard disks.",
+        ttk.Label(f, text="The OpenCore boot disk is made by this program and is not listed here.",
                   foreground=GREY).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Label(f, text="A .dmg or .cue image works as a CD. A .dmg as a hard disk is read "
                           "only: what the Mac writes to it is thrown away when the machine "
-                          "quits. Host drive… gives a CD position a real optical drive; discs "
+                          "quits. Host drive… gives a position a real optical drive; discs "
                           "can be changed while the machine runs.",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 40, justify="left").grid(
             row=2, column=0, sticky="w", pady=(6, 0))
@@ -404,11 +318,6 @@ class MachineEditor(tk.Toplevel):
         if paths.qemu_img_binary().is_file():
             self.new_disk_button = ttk.Button(f, text="New disk…", command=self._new_disk)
             self.new_disk_button.grid(row=3, column=0, sticky="w", pady=(8, 0))
-
-    def _boot_row_toggled(self, row: DriveRow):
-        for other in self.drive_rows:
-            if other is not row:
-                other.boot.set(False)
 
     def _new_disk(self):
         dlg = CreateDiskDialog(self, self.collect(), self.machine_folder())
@@ -418,8 +327,8 @@ class MachineEditor(tk.Toplevel):
         if slot is not None:
             self.drive_rows[slot].set_drive(Drive(kind="disk", file=path, format=fmt))
 
-    def _build_net_audio(self):
-        f = self._tab("Network & sound")
+    def _build_network(self):
+        f = self._tab("Network")
         ttk.Label(f, text="Network", font=("", 0, "bold")).grid(
             row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
         ttk.Label(f, text="Connection:").grid(row=1, column=0, sticky="w")
@@ -459,43 +368,6 @@ class MachineEditor(tk.Toplevel):
             for c, x in enumerate(w):
                 x.grid(row=3 + i, column=c, sticky="w", padx=(0, 6), pady=1)
             self.fwd_rows.append((proto, hp, gp, w))
-        ttk.Separator(f).grid(row=5, column=0, columnspan=3, sticky="ew", pady=10)
-        ttk.Label(f, text="Sound interface", font=("", 0, "bold")).grid(
-            row=6, column=0, columnspan=3, sticky="w", pady=(0, 4))
-        self.audio_var = tk.StringVar(value="default")
-        self.audio_default_rb = ttk.Radiobutton(f, text=model.default_audio_label(paths.HOST_PLATFORM),
-                                                variable=self.audio_var, value="default")
-        self.audio_default_rb.grid(row=7, column=0, columnspan=3, sticky="w")
-        ttk.Radiobutton(f, text="SDL", variable=self.audio_var, value="sdl").grid(
-            row=8, column=0, columnspan=3, sticky="w")
-        ttk.Radiobutton(f, text="None", variable=self.audio_var, value="none").grid(
-            row=9, column=0, columnspan=3, sticky="w")
-        ttk.Separator(f).grid(row=10, column=0, columnspan=3, sticky="ew", pady=10)
-        ttk.Label(f, text="USB", font=("", 0, "bold")).grid(
-            row=11, column=0, columnspan=3, sticky="w", pady=(0, 4))
-        self.usb_audio_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="USB audio device (microphone input)",
-                        variable=self.usb_audio_var).grid(row=12, column=0, columnspan=3,
-                                                          sticky="w")
-        self.usb_tablet_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="USB tablet (absolute pointer)",
-                        variable=self.usb_tablet_var).grid(row=13, column=0, columnspan=3,
-                                                           sticky="w")
-        ttk.Separator(f).grid(row=14, column=0, columnspan=3, sticky="ew", pady=10)
-        ttk.Label(f, text="CD", font=("", 0, "bold")).grid(
-            row=15, column=0, columnspan=3, sticky="w", pady=(0, 4))
-        self.cd_audio_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f, text="CD audio out (audio discs play through the sound interface)",
-                        variable=self.cd_audio_var).grid(row=16, column=0, columnspan=3,
-                                                         sticky="w")
-        ttk.Separator(f).grid(row=17, column=0, columnspan=3, sticky="ew", pady=10)
-        ttk.Label(f, text="MIDI", font=("", 0, "bold")).grid(
-            row=18, column=0, columnspan=3, sticky="w", pady=(0, 4))
-        ttk.Label(f, text="In the guest: Audio MIDI Setup > Network, host 10.0.2.2, port 5004.",
-                  foreground=GREY).grid(row=19, column=0, columnspan=3, sticky="w")
-        ttk.Label(f, text=("On this PC: an rtpMIDI session." if paths.is_windows(paths.HOST_PLATFORM)
-                           else "On this Mac: an RTP session in Audio MIDI Setup."),
-                  foreground=GREY).grid(row=20, column=0, columnspan=3, sticky="w")
 
     def _net_mode_changed(self, _e=None):
         mode = model.network_mode_by_label(self.net_mode.get())
@@ -543,26 +415,12 @@ class MachineEditor(tk.Toplevel):
         ttk.Label(f, text="In the Mac: ftp://10.0.2.2/ with the default network setting.",
                   foreground=GREY).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-        self.share_volume = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="Mac OS X volume (virtio-9p)", variable=self.share_volume,
-                        command=self._share_changed).grid(row=7, column=0, columnspan=3,
-                                                          sticky="w", pady=(12, 0))
-        ttk.Label(f, text="Volume name:").grid(row=8, column=0, sticky="w", pady=4)
-        self.share_volume_var = tk.StringVar(value=model.SHARE_DEFAULT_VOLUME)
-        self.share_volume_entry = ttk.Entry(f, textvariable=self.share_volume_var, width=20)
-        self.share_volume_entry.grid(row=8, column=1, sticky="w", pady=4)
-        ttk.Label(f, text="Mac OS X 10.4 and 10.5 with osx9p installed (from its CD): the "
-                          "folder appears in the Finder, read and write, with file types "
-                          "and resource forks.",
-                  foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
-            row=9, column=0, columnspan=3, sticky="w")
         self._share_changed()
 
     def _share_changed(self):
         ftp = "normal" if self.share_ftp.get() else "disabled"
         for w in (self.share_user_entry, self.share_password_entry, *self.share_scope_rbs):
             w.config(state=ftp)
-        self.share_volume_entry.config(state="normal" if self.share_volume.get() else "disabled")
 
     def _choose_share_folder(self):
         start = paths.browse_start_dir(self.share_folder_var.get(), None)
@@ -570,18 +428,31 @@ class MachineEditor(tk.Toplevel):
         if d:
             self.share_folder_var.set(d)
 
-    def _build_usb_host(self):
+    def _build_usb(self):
         f = self._tab("USB devices")
         f.columnconfigure(0, weight=1)
-        f.rowconfigure(1, weight=1)
+        self.usb_tablet_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f, text="USB tablet (absolute pointer; off: a USB mouse)",
+                        variable=self.usb_tablet_var).grid(row=0, column=0, sticky="w")
+        self.usb_audio_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="USB audio device (sound out and microphone in)",
+                        variable=self.usb_audio_var).grid(row=1, column=0, sticky="w")
+        if paths.HOST_PLATFORM == "darwin":
+            self._build_usb_host(f)
+        elif paths.is_windows(paths.HOST_PLATFORM):
+            self._build_usb_host_win(f)
+
+    def _build_usb_host(self, f):
+        ttk.Separator(f).grid(row=2, column=0, sticky="ew", pady=10)
+        f.rowconfigure(4, weight=1)
         ttk.Label(f, text="Host USB devices this Mac takes while it runs. With any device "
                           "ticked the machine starts with sudo and asks for your password. "
-                          "High-speed devices go on the USB 2.0 bus, others on the second "
-                          "USB 1.1 bus.",
+                          "High-speed devices go on a USB 2.0 controller added to the machine, "
+                          "others on the USB 1.1 controller.",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
-            row=0, column=0, sticky="ew", pady=(0, 6))
+            row=3, column=0, sticky="ew", pady=(0, 6))
         self.usb_host_list = ttk.Frame(f)
-        self.usb_host_list.grid(row=1, column=0, sticky="nsew")
+        self.usb_host_list.grid(row=4, column=0, sticky="nsew")
         self.usb_host_vars: dict[str, tk.BooleanVar] = {}
         self.usb_host_info: dict[str, UsbHostDevice] = {}
         self.usb_host_boxes: dict[str, ttk.Checkbutton] = {}
@@ -637,21 +508,20 @@ class MachineEditor(tk.Toplevel):
 
     # Windows: QEMU opens only devices on WinUSB; winusb-switch moves them.
 
-    def _build_usb_host_win(self):
-        f = self._tab("USB devices")
-        f.columnconfigure(0, weight=1)
-        f.rowconfigure(1, weight=1)
+    def _build_usb_host_win(self, f):
+        ttk.Separator(f).grid(row=2, column=0, sticky="ew", pady=10)
+        f.rowconfigure(4, weight=1)
         ttk.Label(f, text="Host USB devices this machine takes while it runs. QEMU can use a "
                           "device only while it is on Windows' WinUSB driver: Give to QEMU puts "
                           "it there, Give back to Windows returns it; each asks once for "
-                          "administrator rights. High-speed devices go on the USB 2.0 bus, "
-                          "others on the second USB 1.1 bus.",
+                          "administrator rights. High-speed devices go on a USB 2.0 controller "
+                          "added to the machine, others on the USB 1.1 controller.",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
-            row=0, column=0, sticky="ew", pady=(0, 6))
+            row=3, column=0, sticky="ew", pady=(0, 6))
         self.usb_host_list = ttk.Frame(f)
-        self.usb_host_list.grid(row=1, column=0, sticky="nsew")
+        self.usb_host_list.grid(row=4, column=0, sticky="nsew")
         self.usb_status = ttk.Label(f, text="", wraplength=EDITOR_WIDTH - 60, justify="left")
-        self.usb_status.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        self.usb_status.grid(row=5, column=0, sticky="ew", pady=(6, 0))
         self._usb_win = True
         self.usb_busy = False
         self.usb_host_vars: dict[str, tk.BooleanVar] = {}
@@ -784,58 +654,38 @@ class MachineEditor(tk.Toplevel):
     def _build_advanced(self):
         f = self._tab("Advanced")
         f.columnconfigure(1, weight=1)
-        ttk.Label(f, text="Open Firmware", font=("", 0, "bold")).grid(
-            row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
-        self.boot_into_ofw_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="Boot into Open Firmware",
-                        variable=self.boot_into_ofw_var).grid(
-            row=1, column=0, columnspan=2, sticky="w")
-        ttk.Label(f, text="Boot-device:").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        self.boot_device_var = tk.StringVar()
-        ttk.Entry(f, textvariable=self.boot_device_var, width=30).grid(
-            row=2, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(f, text="Boot-args:").grid(row=3, column=0, sticky="w", pady=(6, 0))
-        self.boot_args_var = tk.StringVar()
-        ttk.Entry(f, textvariable=self.boot_args_var, width=30).grid(
-            row=3, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(f, text="These are set in the NVRAM at every start. "
-                          "An empty field keeps what the NVRAM holds.",
-                  foreground=GREY).grid(row=4, column=0, columnspan=3, sticky="w")
-        ttk.Label(f, text="Date and time:").grid(row=5, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(f, text="Date and time:").grid(row=0, column=0, sticky="w", pady=(0, 0))
         self.rtc_base_var = tk.StringVar()
         ttk.Combobox(f, textvariable=self.rtc_base_var, values=list(model.RTC_BASE_CHOICES),
-                     width=28).grid(row=5, column=1, sticky="w", pady=(6, 0))
+                     width=28).grid(row=0, column=1, sticky="w")
         ttk.Label(f, text="Empty: the host's clock (UTC). localtime: the host's local time. "
                           "Or a fixed start like 2005-04-29T10:30:00.",
-                  foreground=GREY).grid(row=6, column=0, columnspan=3, sticky="w")
-        ttk.Separator(f).grid(row=7, column=0, columnspan=3, sticky="ew", pady=10)
+                  foreground=GREY).grid(row=1, column=0, columnspan=3, sticky="w")
+        ttk.Separator(f).grid(row=2, column=0, columnspan=3, sticky="ew", pady=10)
         ttk.Label(f, text="Additional command line arguments", font=("", 0, "bold")).grid(
-            row=8, column=0, columnspan=3, sticky="w", pady=(0, 4))
+            row=3, column=0, columnspan=3, sticky="w", pady=(0, 4))
         self.extra_var = tk.StringVar()
         ttk.Entry(f, textvariable=self.extra_var, width=70).grid(
-            row=9, column=0, columnspan=3, sticky="ew")
+            row=4, column=0, columnspan=3, sticky="ew")
 
     def load(self, m: Machine):
         self.name_var.set(m.name)
-        self.ram_var.set(str(m.ram_mb))
+        self.model_var.set(m.mac_model)
+        self.os_var.set(m.os)
         self.smp_var.set(str(m.smp))
-        self.decr_cap_var.set(m.decr_cap_ms > 0)
-        self.bios_var.set(m.bios or model.FIRMWARE_FILE)
+        self.ram_var.set(str(m.ram_mb))
+        self.accel_cb.config(values=model.accel_labels_for_host(paths.HOST_PLATFORM, m.accel))
+        self.accel_var.set(model.accel_label(m.accel))
         self.display_var.set(m.display)
         self.vnc_on.set(bool(m.vnc.strip()))
         self.vnc_var.set(m.vnc)
         self._vnc_changed()
-        g = m.gpu or Gpu()
-        self.gpu_model_var.set(m.gpu.model if m.gpu else NO_GPU)
-        self.gpu_rom_var.set(g.romfile or "")
-        self.gl_var.set(g.gl)
-        self.raster_var.set(str(g.raster_threads))
-        self.async_var.set(g.async_engine)
-        self.agp_var.set(g.agp)
-        self._gpu_changed()
+        self.resolution_var.set(m.resolution)
+        self.picker_var.set(m.show_picker)
+        self.boot_args_var.set(m.boot_args)
+        self.serial_var.set(m.serial_log)
         for i, row in enumerate(self.drive_rows):
             row.set_drive(m.drives[i] if i < len(m.drives) else None)
-            row.boot.set(i == m.boot_slot)
         self.net_mode_cb.config(
             values=model.network_labels_for_host(paths.HOST_PLATFORM, m.network.mode))
         self.net_mode.set(model.network_mode_label(m.network.mode))
@@ -847,22 +697,14 @@ class MachineEditor(tk.Toplevel):
             hp.set(r.host_port)
             gp.set(r.guest_port)
         self._net_mode_changed()
-        self.audio_var.set(m.audio)
         self.usb_audio_var.set(m.usb_audio)
-        self.cd_audio_var.set(m.cd_audio)
         self.usb_tablet_var.set(m.usb_tablet)
         self.share_folder_var.set(m.share.folder)
         self.share_user_var.set(m.share.user)
         self.share_password_var.set(m.share.password)
         self.share_scope.set(m.share.scope)
         self.share_ftp.set(m.share.ftp)
-        self.share_volume.set(m.share.volume)
-        self.share_volume_var.set(m.share.volume_name)
         self._share_changed()
-        # inverted: the checkbox asks the opposite question from the field
-        self.boot_into_ofw_var.set(not m.prom_env.auto_boot)
-        self.boot_device_var.set(m.prom_env.boot_device)
-        self.boot_args_var.set(m.prom_env.boot_args)
         self.rtc_base_var.set(m.rtc_base)
         self.extra_var.set(m.extra_args)
         if hasattr(self, "usb_host_list"):
@@ -871,48 +713,34 @@ class MachineEditor(tk.Toplevel):
     def collect(self) -> Machine:
         m = self.machine.copy()
         m.name = self.name_var.get().strip()
-        try:
-            m.ram_mb = int(self.ram_var.get().strip())
-        except ValueError:
-            m.ram_mb = -1
+        m.mac_model = self.model_var.get()
+        m.os = self.os_var.get()
         try:
             m.smp = int(self.smp_var.get().strip())
         except ValueError:
             m.smp = -1
-        if not self.decr_cap_var.get():
-            m.decr_cap_ms = 0
-        elif m.decr_cap_ms <= 0:
-            m.decr_cap_ms = model.DECR_CAP_MS
-        m.bios = self.bios_var.get().strip() or model.FIRMWARE_FILE
+        try:
+            m.ram_mb = int(self.ram_var.get().strip())
+        except ValueError:
+            m.ram_mb = -1
+        m.accel = model.accel_by_label(self.accel_var.get())
         m.display = self.display_var.get()
         m.vnc = self.vnc_var.get().strip() if self.vnc_on.get() else ""
-        gpu = self.gpu_model_var.get()
-        if gpu != NO_GPU:
-            try:
-                threads = int(self.raster_var.get().strip())
-            except ValueError:
-                threads = -1
-            m.gpu = Gpu(gpu, self.gpu_rom_var.get().strip() or None, self.gl_var.get(),
-                        threads, self.async_var.get(), self.agp_var.get())
-        else:
-            m.gpu = None
+        m.resolution = self.resolution_var.get()
+        m.show_picker = self.picker_var.get()
+        m.boot_args = " ".join(self.boot_args_var.get().split())
+        m.serial_log = self.serial_var.get()
         m.drives = [row.get_drive() for row in self.drive_rows]
-        m.boot_slot = next((i for i, row in enumerate(self.drive_rows) if row.boot.get()), None)
         mode = model.network_mode_by_label(self.net_mode.get())
         ifname = self.ifname_var.get().strip() if mode in model.NETWORK_MODES_WITH_IFNAME else ""
         fwd = [model.HostFwd(p.get(), h.get().strip(), g.get().strip())
                for p, h, g, _w in self.fwd_rows]
         m.network = Network(mode, self.mac_var.get().strip(), ifname, fwd)
-        m.audio = self.audio_var.get()
         m.usb_audio = self.usb_audio_var.get()
-        m.cd_audio = self.cd_audio_var.get()
         m.usb_tablet = self.usb_tablet_var.get()
         m.share = Share(self.share_folder_var.get().strip(), self.share_user_var.get().strip(),
                         self.share_password_var.get(), self.share_scope.get(),
-                        self.share_ftp.get(), self.share_volume.get(),
-                        self.share_volume_var.get().strip())
-        m.prom_env = PromEnv(not self.boot_into_ofw_var.get(), self.boot_device_var.get().strip(),
-                             self.boot_args_var.get().strip())
+                        self.share_ftp.get())
         m.rtc_base = self.rtc_base_var.get().strip()
         m.extra_args = self.extra_var.get().strip()
         if hasattr(self, "usb_host_list"):

@@ -1,8 +1,8 @@
-"""Qemu-system-ppc64 G5 Openbios GUI: a portable launcher for the QEMU PowerMac7,3
-(G5) machine.
+"""Qemu-system-x86_64 OpenCore GUI: a portable launcher for QEMU q35 + OVMF +
+OpenCore running Intel Mac OS X.
 
-Standard library only. ``g5_command``, ``g5_model`` and ``paths``
-import no Tk and can be used headless (that is what the tests do).
+Standard library only. ``x86_command``, ``x86_model``, ``x86_esp`` and
+``paths`` import no Tk and can be used headless.
 """
 
 __version__ = "0.1.0"

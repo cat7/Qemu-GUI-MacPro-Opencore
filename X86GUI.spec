@@ -1,27 +1,27 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec for Qemu-system-ppc64 G5 Openbios GUI.
+# PyInstaller spec for Qemu-system-x86_64 OpenCore GUI.
 #
 # macOS, with the python.org framework Python (it has a working tkinter):
 #
 #   /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 \
-#       -m PyInstaller --noconfirm G5GUI.spec
+#       -m PyInstaller --noconfirm X86GUI.spec
 #
 # The macOS bundle is universal2 unless QEMUGUI_TARGET_ARCH says otherwise
 # (x86_64 or universal2).
 #
-# Put the result ("dist/Qemu-system-ppc64 G5 Openbios GUI.app" on macOS, the single
-# "dist/Qemu-system-ppc64 G5 Openbios GUI.exe" on Windows) into the folder that holds
-# qemu-system-ppc64, openbios-qemu.elf and pc-bios/. Machines/ is made
+# Put the result ("dist/Qemu-system-x86_64 OpenCore GUI.app" on macOS, the single
+# "dist/Qemu-system-x86_64 OpenCore GUI.exe" on Windows) into the folder that holds
+# qemu-system-x86_64, pc-bios/ and OpenCore/. Machines/ is made
 # beside the application, never inside the bundle.
 
 import os
 import sys
 
-NAME = 'Qemu-system-ppc64 G5 Openbios GUI'
+NAME = 'Qemu-system-x86_64 OpenCore GUI'
 TARGET_ARCH = (os.environ.get('QEMUGUI_TARGET_ARCH') or 'universal2') if sys.platform == 'darwin' else None
 
 a = Analysis(
-    ['g5_gui.py'],
+    ['x86_gui.py'],
     pathex=[],
     binaries=[],
     datas=[],
@@ -80,7 +80,7 @@ else:
         coll,
         name=NAME + '.app',
         icon=None,
-        bundle_identifier='org.cat7.qemu-gui-g5',
+        bundle_identifier='org.cat7.qemu-gui-x86-opencore',
         info_plist={
             'CFBundleName': NAME,
             'CFBundleDisplayName': NAME,

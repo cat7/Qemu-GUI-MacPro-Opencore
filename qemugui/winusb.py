@@ -1,6 +1,6 @@
 """Host USB devices on Windows. QEMU's usb-host (libusb) can open a device
 only while it is on Windows' own WinUSB driver. ``winusb-switch.exe``, next
-to ``qemu-system-ppc64.exe``, moves one device there and back:
+to ``qemu-system-x86_64.exe``, moves one device there and back:
 
 * ``list`` runs unelevated and prints one JSON object per device;
 * ``bind`` / ``unbind`` need administrator rights, so they run through
@@ -143,7 +143,7 @@ def parse_result(text: str) -> dict:
 
 
 def helper_path(folder: Path | str | None = None) -> Path:
-    """Beside qemu-system-ppc64.exe, which is the folder this GUI runs from."""
+    """Beside qemu-system-x86_64.exe, which is the folder this GUI runs from."""
     return Path(folder or paths.install_dir()) / HELPER
 
 
