@@ -16,7 +16,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE))
 
+import support  # noqa: E402
 from qemugui import usbhost  # noqa: E402
 from qemugui import paths  # noqa: E402
 from qemugui import x86_command as command  # noqa: E402
@@ -205,7 +207,11 @@ class Launcher(unittest.TestCase):
         self.assertIn('chown "${SUDO_USER:-$(id -un)}" OVMF_VARS.fd serial.log', text)
         for word in ("usbhostd", "attach", "USBREDIR"):
             self.assertNotIn(word, text)
-        r = subprocess.run(["/bin/bash", "-n"], input=text, text=True, capture_output=True)
+
+    @support.needs_bash
+    def test_the_sudo_launcher_is_valid_shell(self):
+        text = command.launcher_text(self.machine(), QD, MD, "darwin")
+        r = subprocess.run([support.BASH, "-n"], input=text, text=True, capture_output=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_no_devices_no_sudo(self):

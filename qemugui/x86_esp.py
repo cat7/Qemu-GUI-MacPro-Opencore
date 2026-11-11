@@ -20,6 +20,8 @@ from .x86_model import Machine
 
 APPLE_NVRAM_GUID = "7C436110-AB2A-4BBB-A880-FE41995C9F82"
 FIXED_BOOT_ARGS = "keepsyms=1 debug=0x100"
+# kernel messages reach the serial port
+SERIAL_BOOT_ARGS = "keepsyms=1 debug=0x108 serial=3"
 SERIAL_NUMBER = "W00000000001"
 BOARD_SERIAL = "M0000000000000001"
 PICKER_TIMEOUT = 5
@@ -39,11 +41,35 @@ class EspError(OSError):
 
 
 def boot_args(m: Machine) -> str:
-    tokens = (FIXED_BOOT_ARGS + " " + (m.boot_args or "")).split()
-    if "-v" in tokens:
-        raise EspError("Verbose boot (-v) cannot be used: the Mac OS X 10.5 boot loader "
-                       "crashes with it.")
-    return " ".join(tokens)
+    tokens = (SERIAL_BOOT_ARGS if m.serial_log else FIXED_BOOT_ARGS).split()
+    extra = (m.boot_args or "").split()
+    if m.verbose and "-v" not in extra:
+        tokens.append("-v")
+    return " ".join(tokens + extra)
+
+
+GPU_PATH = "PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)"
+GPU_FRAMEBUFFER = "ATY,Alopias"
+
+
+def x1900_properties() -> dict:
+    fb = GPU_FRAMEBUFFER
+    props = {
+        "name": fb + "Parent",
+        "device_type": fb + "Parent",
+        "model": "ATI Radeon X1900 XT",
+        "VRAM,totalsize": (256 << 20).to_bytes(4, "little"),
+        "ATY,Copyright": b"Copyright ATI Technologies Inc. 2005",
+        "ATY,EFIVersion": b"01.00.068",
+        "ATY,Rom#": b"113-A52025-xxx",
+        "ATY,Card#": b"109-A52025-00",
+        "ATY,PlatformInfo": bytes(128),
+    }
+    for i in (0, 1):
+        props.update({f"@{i},name": fb, f"@{i},compatible": fb, f"@{i},device_type": "display"})
+    # keeps ATIRadeonX1000 from matching until R500 3D works
+    props["device-id"] = bytes.fromhex("48720000")
+    return props
 
 
 def rom_bytes(m: Machine) -> bytes:
@@ -106,7 +132,8 @@ def make_config(m: Machine, sample: dict, kexts: list[Path]) -> dict:
         ClearTaskSwitchBit=True)
 
     props = _section(p, "DeviceProperties")
-    props.update(Add={}, Delete={})
+    props.update(Add={GPU_PATH: x1900_properties()} if m.gpu == model.GPU_X1900 else {},
+                 Delete={})
 
     picker = bool(m.show_picker)
     misc = _section(p, "Misc")
@@ -143,7 +170,8 @@ def make_config(m: Machine, sample: dict, kexts: list[Path]) -> dict:
     uefi["Drivers"] = [dict(Arguments="", Comment="", Enabled=True, HideVerbose=False,
                             LoadEarly=False, Path=d) for d in paths.OPENCORE_DRIVERS]
     _section(uefi, "Quirks")["RequestBootVarRouting"] = True
-    _section(uefi, "Output").update(ProvideConsoleGop=True, Resolution=m.resolution,
+    resolution = model.GPU_X1900_RESOLUTION if m.gpu == model.GPU_X1900 else m.resolution
+    _section(uefi, "Output").update(ProvideConsoleGop=True, Resolution=resolution,
                                     TextRenderer="BuiltinText", UgaPassThrough=True,
                                     InitialMode="Text")
     return p

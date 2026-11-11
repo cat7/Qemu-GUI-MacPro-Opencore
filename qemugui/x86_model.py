@@ -104,6 +104,26 @@ ACCEL_DEFAULT = "tcg"
 RESOLUTIONS = ("1024x768", "1280x800", "1440x900", "1680x1050", "1920x1200")
 RESOLUTION_DEFAULT = "1440x900"
 
+GPU_STD = "std"
+GPU_X1900 = "x1900"
+GPU_LABELS = {GPU_STD: "Standard VGA",
+              GPU_X1900: "ATI Radeon X1900 XT (no acceleration yet)"}
+GPUS = tuple(GPU_LABELS)
+GPU_DEFAULT = GPU_STD
+# the only mode the X1900 firmware driver offers
+GPU_X1900_RESOLUTION = "1024x768"
+
+
+def gpu_label(gpu: str) -> str:
+    return GPU_LABELS.get(gpu, GPU_LABELS[GPU_DEFAULT])
+
+
+def gpu_by_label(label: str) -> str:
+    for k, v in GPU_LABELS.items():
+        if v == label:
+            return k
+    return GPU_DEFAULT
+
 # the variable store, QEMU's to write: a sudo run gives it back to the user
 VARS_FILE = paths.OVMF_VARS_NAME
 ESP_DIR = "esp"
@@ -362,10 +382,12 @@ class Machine:
     accel: str = ACCEL_DEFAULT
     display: str = "cocoa"
     vnc: str = ""                  # "" = off; else a -vnc display spec, e.g. ":1"
+    gpu: str = GPU_DEFAULT
     resolution: str = RESOLUTION_DEFAULT
     show_picker: bool = False
     boot_args: str = ""            # kernel arguments after the fixed ones
     serial_log: bool = False
+    verbose: bool = False
     drives: list = field(default_factory=lambda: [None] * len(DRIVE_SLOTS))
     network: Network = field(default_factory=Network)
     usb_tablet: bool = True        # False: usb-mouse
@@ -389,10 +411,12 @@ class Machine:
             "accel": self.accel,
             "display": self.display,
             "vnc": self.vnc,
+            "gpu": self.gpu,
             "resolution": self.resolution,
             "show_picker": self.show_picker,
             "boot_args": self.boot_args,
             "serial_log": self.serial_log,
+            "verbose": self.verbose,
             "drives": [d.to_dict() if d else None for d in self.drives],
             "network": self.network.to_dict(),
             "usb_tablet": self.usb_tablet,
@@ -419,10 +443,12 @@ class Machine:
             accel=str(d.get("accel") or ACCEL_DEFAULT),
             display=str(d.get("display") or default_display(paths.HOST_PLATFORM)),
             vnc=str(d.get("vnc", "") or ""),
+            gpu=str(d.get("gpu") or GPU_DEFAULT),
             resolution=str(d.get("resolution") or RESOLUTION_DEFAULT),
             show_picker=bool(d.get("show_picker", False)),
             boot_args=str(d.get("boot_args", "") or ""),
             serial_log=bool(d.get("serial_log", False)),
+            verbose=bool(d.get("verbose", False)),
             drives=drives,
             network=Network.from_dict(d.get("network")),
             usb_tablet=bool(d.get("usb_tablet", True)),
@@ -483,10 +509,17 @@ def file_fields(m: Machine) -> dict[str, str]:
     return {f"drives[{i}]": (d.file if d else "") for i, d in enumerate(m.drives)}
 
 
-def start_blockers(m: Machine, key_file: str | Path | None = None) -> list[str]:
-    """What stops a start: the SMC key file."""
+def start_blockers(m: Machine, key_file: str | Path | None = None,
+                   qemu_dir: str | Path | None = None) -> list[str]:
+    """What stops a start: the SMC key file, the X1900 ROM file."""
     why = smc_key_problem(key_file if key_file is not None else paths.default_smc_key_file())
-    return [why] if why else []
+    out = [why] if why else []
+    if m.gpu == GPU_X1900:
+        rom = Path(qemu_dir) if qemu_dir else paths.install_dir()
+        if not (rom / paths.R580_ROM_NAME).is_file():
+            out.append(f"The graphics card needs the file {paths.R580_ROM_NAME} in the "
+                       "folder with the program, and it is not there.")
+    return out
 
 
 # ---------------------------------------------------------------- checking
@@ -516,6 +549,8 @@ def validate(m: Machine, qemu_dir: str | None = None, platform: str = paths.HOST
         errors.append(f"'{m.accel}' is not an acceleration setting.")
     elif m.accel not in accel_choices(platform):
         warnings.append(f"{m.accel} does not work on this computer.")
+    if m.gpu not in GPUS:
+        errors.append(f"'{m.gpu}' is not a graphics card this machine can have.")
     if m.resolution not in RESOLUTIONS:
         errors.append("Screen size at boot has to be " + ", ".join(RESOLUTIONS) + ".")
     if m.display == "cocoa" and platform != "darwin":
@@ -525,9 +560,6 @@ def validate(m: Machine, qemu_dir: str | None = None, platform: str = paths.HOST
     if m.rtc_base.strip() and not RTC_BASE_RE.match(m.rtc_base.strip()):
         errors.append("Date and time has to be localtime, utc, or look like "
                       "2005-04-29T10:30:00.")
-    if "-v" in boot_arg_tokens(m.boot_args):
-        errors.append("Verbose boot (-v) cannot be used: the Mac OS X 10.5 boot loader "
-                      "crashes with it.")
 
     net = m.network
     if net.mode not in NETWORK_MODES:
@@ -709,7 +741,7 @@ class Library:
         d = self.folder(name)
         if not d.is_dir():
             return []
-        return sorted(str(p.relative_to(d)) for p in d.rglob("*") if p.is_file() or p.is_symlink())
+        return sorted(p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file() or p.is_symlink())
 
     def delete_preview(self, name: str) -> tuple[list[str], list[str]]:
         contents = self.folder_contents(name)

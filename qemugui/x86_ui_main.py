@@ -486,7 +486,7 @@ class MainWindow(tk.Tk):
             messagebox.showwarning("Start", f"“{m.name}” is already running.")
             return None
         errors, _warnings = model.validate(m, qemu_dir(), machine_dir=str(self.library.folder(m.name)))
-        errors += model.start_blockers(m, self.key_file())
+        errors += model.start_blockers(m, self.key_file(), qemu_dir())
         if errors:
             messagebox.showerror("Start", "\n".join(f"• {e}" for e in errors))
             return None

@@ -29,6 +29,7 @@ The program sits in the folder that holds:
         Docs/Sample.plist
     Kexts/                         optional; every *.kext folder is injected
     OSK-Key.txt                    SMC key file (path is a setting)
+    ati-r580-gop.rom               optional; ROM of the ATI Radeon X1900 XT card
 
 The SMC key file is one line of exactly 64 printable characters. The key is
 read by the launcher each time it runs and is stored nowhere else.

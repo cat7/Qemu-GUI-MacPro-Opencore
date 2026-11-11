@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import plistlib
 import sys
+import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -17,6 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from qemugui import paths  # noqa: E402
 
 DUMMY_KEY = "x" * 64
+
+BASH = "/bin/bash"
+needs_bash = unittest.skipUnless(sys.platform != "win32", "no bash")
+needs_exec_bit = unittest.skipUnless(sys.platform != "win32", "no execute bit")
 
 SAMPLE = {
     "#WARNING - 1": "text",

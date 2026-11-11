@@ -263,10 +263,20 @@ class MachineEditor(tk.Toplevel):
         r += 1
         ttk.Separator(f).grid(row=r, column=0, columnspan=3, sticky="ew", pady=10)
         r += 1
+        ttk.Label(f, text="Graphics card:").grid(row=r, column=0, sticky="w", pady=4)
+        self.gpu_var = tk.StringVar()
+        self.gpu_cb = ttk.Combobox(f, textvariable=self.gpu_var,
+                                   values=[model.gpu_label(g) for g in model.GPUS],
+                                   state="readonly", width=40)
+        self.gpu_cb.grid(row=r, column=1, columnspan=2, sticky="w", pady=4)
+        self.gpu_cb.bind("<<ComboboxSelected>>", self._gpu_changed)
+        r += 1
         ttk.Label(f, text="Screen size at boot:").grid(row=r, column=0, sticky="w", pady=4)
         self.resolution_var = tk.StringVar()
-        ttk.Combobox(f, textvariable=self.resolution_var, values=list(model.RESOLUTIONS),
-                     state="readonly", width=12).grid(row=r, column=1, sticky="w", pady=4)
+        self.resolution_cb = ttk.Combobox(f, textvariable=self.resolution_var,
+                                          values=list(model.RESOLUTIONS), state="readonly",
+                                          width=12)
+        self.resolution_cb.grid(row=r, column=1, sticky="w", pady=4)
         r += 1
         self.picker_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="Show the boot picker at start",
@@ -278,15 +288,27 @@ class MachineEditor(tk.Toplevel):
         ttk.Entry(f, textvariable=self.boot_args_var, width=40).grid(
             row=r, column=1, sticky="ew", pady=(6, 0))
         r += 1
-        ttk.Label(f, text="Added after keepsyms=1 debug=0x100. -v is not allowed: the Mac OS X "
-                          "10.5 boot loader crashes with it.",
+        ttk.Label(f, text="Added after keepsyms=1 debug=0x100 (debug=0x108 serial=3 with a "
+                          "serial log).",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
             row=r, column=0, columnspan=3, sticky="w")
+        r += 1
+        self.verbose_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Verbose boot", variable=self.verbose_var).grid(
+            row=r, column=0, columnspan=3, sticky="w", pady=(6, 0))
         r += 1
         self.serial_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="Write a serial log (serial.log in the machine folder)",
                         variable=self.serial_var).grid(row=r, column=0, columnspan=3,
                                                        sticky="w", pady=(10, 0))
+
+    def _gpu_changed(self, _e=None):
+        """The X1900 firmware driver offers one mode: the size is fixed to it."""
+        if model.gpu_by_label(self.gpu_var.get()) == model.GPU_X1900:
+            self.resolution_var.set(model.GPU_X1900_RESOLUTION)
+            self.resolution_cb.config(state="disabled")
+        else:
+            self.resolution_cb.config(state="readonly")
 
     def _vnc_changed(self, _e=None):
         if self.vnc_on.get():
@@ -680,10 +702,13 @@ class MachineEditor(tk.Toplevel):
         self.vnc_on.set(bool(m.vnc.strip()))
         self.vnc_var.set(m.vnc)
         self._vnc_changed()
+        self.gpu_var.set(model.gpu_label(m.gpu))
         self.resolution_var.set(m.resolution)
+        self._gpu_changed()
         self.picker_var.set(m.show_picker)
         self.boot_args_var.set(m.boot_args)
         self.serial_var.set(m.serial_log)
+        self.verbose_var.set(m.verbose)
         for i, row in enumerate(self.drive_rows):
             row.set_drive(m.drives[i] if i < len(m.drives) else None)
         self.net_mode_cb.config(
@@ -726,10 +751,12 @@ class MachineEditor(tk.Toplevel):
         m.accel = model.accel_by_label(self.accel_var.get())
         m.display = self.display_var.get()
         m.vnc = self.vnc_var.get().strip() if self.vnc_on.get() else ""
+        m.gpu = model.gpu_by_label(self.gpu_var.get())
         m.resolution = self.resolution_var.get()
         m.show_picker = self.picker_var.get()
         m.boot_args = " ".join(self.boot_args_var.get().split())
         m.serial_log = self.serial_var.get()
+        m.verbose = self.verbose_var.get()
         m.drives = [row.get_drive() for row in self.drive_rows]
         mode = model.network_mode_by_label(self.net_mode.get())
         ifname = self.ifname_var.get().strip() if mode in model.NETWORK_MODES_WITH_IFNAME else ""

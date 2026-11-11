@@ -156,6 +156,18 @@ RUN_BAT = "\r\n".join([
 ])
 
 
+X1900_LINES = (
+    "-vga none \\\n"
+    "-device pci-bridge,id=br1,bus=pcie.0,addr=0x1,chassis_nr=1,shpc=off \\\n"
+    f"-device ati-radeon-x1900,bus=br1,romfile={QD}/ati-r580-gop.rom \\\n")
+RUN_COMMAND_X1900 = RUN_COMMAND.replace("-vga std \\\n", X1900_LINES)
+
+X1900_BAT_LINES = [
+    "-vga none ^",
+    '-device "pci-bridge,id=br1,bus=pcie.0,addr=0x1,chassis_nr=1,shpc=off" ^',
+    rf'-device "ati-radeon-x1900,bus=br1,romfile={WQD}\ati-r580-gop.rom" ^']
+
+
 class GoldenCommandLines(unittest.TestCase):
     """Whole argv lists and launchers, compared exactly."""
 
@@ -173,9 +185,41 @@ class GoldenCommandLines(unittest.TestCase):
         text = command.launcher_text(m, WQD, WMD, "win32", key_file=WKEY)
         self.assertEqual(text, RUN_BAT)
 
+    @support.needs_bash
     def test_the_run_command_is_valid_shell(self):
-        r = subprocess.run(["/bin/bash", "-n"], input=RUN_COMMAND, text=True, capture_output=True)
+        r = subprocess.run([support.BASH, "-n"], input=RUN_COMMAND, text=True, capture_output=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_run_command_with_the_x1900(self):
+        m = default_with_two_drives()
+        m.gpu = "x1900"
+        text = command.launcher_text(m, QD, MD, "darwin", key_file=KEY)
+        self.assertEqual(text, RUN_COMMAND_X1900)
+        self.assertNotIn("-vga std", text)
+
+    @support.needs_bash
+    def test_the_x1900_run_command_is_valid_shell(self):
+        r = subprocess.run([support.BASH, "-n"], input=RUN_COMMAND_X1900, text=True,
+                           capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_run_bat_with_the_x1900(self):
+        m = plain(display="sdl", gpu="x1900",
+                  drives=[Drive("disk", r"C:\images\leopard.qcow2", "qcow2"),
+                          Drive("cdrom", r"C:\images\10.5.iso", "raw"), None, None, None])
+        want = RUN_BAT.replace("-vga std ^", "\r\n".join(X1900_BAT_LINES))
+        self.assertEqual(command.launcher_text(m, WQD, WMD, "win32", key_file=WKEY), want)
+
+    def test_the_x1900_argv_on_both_hosts(self):
+        a = argv_of(plain(gpu="x1900"))
+        i = a.index("-vga")
+        self.assertEqual(a[i:i + 6], [
+            "-vga", "none",
+            "-device", "pci-bridge,id=br1,bus=pcie.0,addr=0x1,chassis_nr=1,shpc=off",
+            "-device", f"ati-radeon-x1900,bus=br1,romfile={QD}/ati-r580-gop.rom"])
+        w = argv_of(plain(gpu="x1900"), "win32", WQD, WMD)
+        self.assertIn(rf"ati-radeon-x1900,bus=br1,romfile={WQD}\ati-r580-gop.rom", w)
+        self.assertEqual(option(argv_of(plain(gpu="std")), "-vga"), ["std"])
 
     def test_a_fixture_record_end_to_end(self):
         m = Machine.load(FIXTURES / "x86-leopard.json")
@@ -317,7 +361,8 @@ class WritingTheLauncher(unittest.TestCase):
         for f in ("run.command", "OVMF_VARS.fd", "esp.img", "esp/EFI/OC/config.plist",
                   "esp/EFI/BOOT/BOOTx64.efi", "esp/EFI/BOOT/.contentVisibility"):
             self.assertTrue((self.md / f).is_file(), f)
-        self.assertTrue((self.md / "run.command").stat().st_mode & 0o100)
+        if sys.platform != "win32":
+            self.assertTrue((self.md / "run.command").stat().st_mode & 0o100)
         self.assertEqual((self.md / "OVMF_VARS.fd").read_bytes(),
                          (self.install / "pc-bios" / "edk2-i386-vars.fd").read_bytes())
 
@@ -371,18 +416,20 @@ class RuntimeVariable(unittest.TestCase):
         self.assertIn('-device "isa-applesmc,osk=$OSK" \\', text)
         self.assertLess(text.index("OSK="), text.index("/q/qemu"))
 
+    @support.needs_bash
     def test_shell_path_with_a_single_quote(self):
         text = paths.render_shell(self.ARGV, "h", (), False, 0, (("OSK", "/k/it's.txt"),))
-        r = subprocess.run(["/bin/bash", "-n"], input=text, text=True, capture_output=True)
+        r = subprocess.run([support.BASH, "-n"], input=text, text=True, capture_output=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    @support.needs_bash
     def test_the_shell_passes_the_value_on_as_one_word(self):
         keyfile = Path(tempfile.mkdtemp()) / "k.txt"
         key = 'a b$c`d\\e"f&g;h*i(j)k'
         keyfile.write_text(key + "\n")
         argv = ["/usr/bin/printf", "%s\\n", "x=" + paths.runtime_ref("OSK")]
         text = paths.render_shell(argv, "h", (), False, 0, (("OSK", str(keyfile)),))
-        out = subprocess.run(["/bin/bash", "-c", text], capture_output=True, text=True)
+        out = subprocess.run([support.BASH, "-c", text], capture_output=True, text=True)
         self.assertEqual(out.stdout, "x=" + key + "\n", out.stderr)
 
     def test_no_runtime_variable_no_line(self):
@@ -445,6 +492,16 @@ class SmcKeyFile(unittest.TestCase):
         self.p.write_text("x" * 64)
         self.assertEqual(model.start_blockers(plain(), self.p), [])
 
+    def test_the_x1900_needs_its_rom_file(self):
+        self.p.write_text("x" * 64)
+        m = plain(gpu="x1900")
+        got = model.start_blockers(m, self.p, self.td.name)
+        self.assertEqual(len(got), 1)
+        self.assertIn("ati-r580-gop.rom", got[0])
+        self.assertEqual(model.start_blockers(plain(), self.p, self.td.name), [])
+        (Path(self.td.name) / "ati-r580-gop.rom").write_bytes(b"rom")
+        self.assertEqual(model.start_blockers(m, self.p, self.td.name), [])
+
     def test_settings_hold_the_path_only(self):
         s = paths.Settings(last_machine="L", smc_key_file=str(self.p))
         f = Path(self.td.name) / "settings.json"
@@ -458,12 +515,30 @@ class SmcKeyFile(unittest.TestCase):
 
 class Record(unittest.TestCase):
 
+    def test_gpu_and_verbose_round_trip(self):
+        m = Machine.from_json(plain(gpu="x1900", verbose=True).to_json())
+        self.assertEqual((m.gpu, m.verbose), ("x1900", True))
+
+    def test_old_records_get_the_standard_card_and_quiet_boot(self):
+        for rec in ({"name": "old"}, {"name": "old", "gpu": "", "verbose": None}):
+            m = Machine.from_dict(rec)
+            self.assertEqual((m.gpu, m.verbose), ("std", False))
+        m = Machine.load(FIXTURES / "x86-minimal.json")
+        self.assertEqual((m.gpu, m.verbose), ("std", False))
+
+    def test_labels(self):
+        self.assertEqual(model.gpu_label("std"), "Standard VGA")
+        self.assertEqual(model.gpu_label("x1900"), "ATI Radeon X1900 XT (no acceleration yet)")
+        for g in model.GPUS:
+            self.assertEqual(model.gpu_by_label(model.gpu_label(g)), g)
+
     def test_defaults(self):
         m = model.new_machine("t")
         self.assertEqual((m.mac_model, m.os, m.smp, m.ram_mb, m.accel, m.resolution),
                          ("MacPro2,1", "10.5", 1, 2048, "tcg", "1440x900"))
         self.assertEqual((m.show_picker, m.boot_args, m.serial_log, m.usb_tablet, m.usb_audio),
                          (False, "", False, True, False))
+        self.assertEqual((m.gpu, m.verbose), ("std", False))
         self.assertEqual(m.network.mac, "52:54:00:12:34:56")
         self.assertEqual(len(m.drives), 5)
         self.assertEqual(m.drives, [None] * 5)
@@ -485,7 +560,7 @@ class Record(unittest.TestCase):
 
     def test_no_ppc_fields(self):
         keys = set(model.new_machine("t").to_dict())
-        for gone in ("gpu", "prom_env", "bios", "decr_cap_ms", "cd_audio", "audio", "boot_slot"):
+        for gone in ("prom_env", "bios", "decr_cap_ms", "cd_audio", "audio", "boot_slot"):
             self.assertNotIn(gone, keys)
         self.assertNotIn("volume", model.new_machine("t").to_dict()["share"])
 
@@ -511,13 +586,16 @@ class Validation(unittest.TestCase):
             errors, _ = self.check(plain(**kw))
             self.assertTrue(errors, kw)
 
-    def test_verbose_boot_is_refused_with_a_plain_message(self):
-        for text in ("-v", "cpus=1 -v", "-v debug=1"):
-            errors, _ = self.check(plain(boot_args=text))
-            self.assertTrue(any("-v" in e and "crashes" in e for e in errors), text)
-        for text in ("", "-x", "cpus=1", "-verbose", "debug=-v"):
+    def test_verbose_boot_is_accepted_in_the_extra_arguments(self):
+        for text in ("", "-x", "-v", "cpus=1 -v", "-verbose", "debug=-v"):
             errors, _ = self.check(plain(boot_args=text))
             self.assertEqual(errors, [], text)
+
+    def test_the_graphics_card_is_enforced(self):
+        errors, _ = self.check(plain(gpu="voodoo"))
+        self.assertTrue(errors)
+        for gpu in model.GPUS:
+            self.assertEqual(self.check(plain(gpu=gpu))[0], [])
 
     def test_hvf_off_a_mac_warns(self):
         _, w = self.check(plain(accel="whpx"), "darwin")
@@ -584,8 +662,8 @@ class StartUp(unittest.TestCase):
         self.assertIn("qemu-system-x86_64.exe", paths.startup_problem("win32"))
 
     def test_missing_opencore_and_firmware_are_listed(self):
-        (Path(self.td.name) / "qemu-system-x86_64").write_text("")
-        text = paths.startup_problem("darwin")
+        (Path(self.td.name) / paths.qemu_binary_name()).write_text("")
+        text = paths.startup_problem()
         self.assertIn("pc-bios/edk2-x86_64-code.fd", text)
         self.assertIn("pc-bios/edk2-i386-vars.fd", text)
         self.assertIn("OpenCore/X64/EFI/OC/OpenCore.efi", text)
@@ -593,7 +671,7 @@ class StartUp(unittest.TestCase):
 
     def test_a_complete_install_has_no_problem(self):
         support.make_install(self.td.name)
-        self.assertIsNone(paths.startup_problem("darwin"))
+        self.assertIsNone(paths.startup_problem())
         self.assertTrue((Path(self.td.name) / "Machines").is_dir())
 
 

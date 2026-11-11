@@ -49,7 +49,7 @@ class Tree(Case):
 
     def test_files(self):
         self.build()
-        got = sorted(str(p.relative_to(self.out)) for p in self.out.rglob("*") if p.is_file())
+        got = sorted(p.relative_to(self.out).as_posix() for p in self.out.rglob("*") if p.is_file())
         want = sorted(["EFI/BOOT/BOOTx64.efi", "EFI/BOOT/.contentVisibility",
                        "EFI/OC/OpenCore.efi", "EFI/OC/config.plist",
                        "EFI/OC/Tools/OpenShell.efi"]
@@ -127,10 +127,60 @@ class Settings(Case):
         self.assertEqual(args(boot_args="cpus=1  -x"), "keepsyms=1 debug=0x100 cpus=1 -x")
         self.assertNotIn("slto_us", args())
 
-    def test_verbose_boot_is_refused(self):
-        with self.assertRaises(esp.EspError) as cm:
-            self.build(machine(boot_args="-v"))
-        self.assertIn("-v", str(cm.exception))
+    def test_verbose_and_serial_boot_args(self):
+        def args(**kw):
+            return self.build(machine(**kw))["NVRAM"]["Add"][APPLE]["boot-args"]
+        self.assertEqual(args(verbose=True), "keepsyms=1 debug=0x100 -v")
+        self.assertEqual(args(serial_log=True), "keepsyms=1 debug=0x108 serial=3")
+        self.assertEqual(args(verbose=True, serial_log=True),
+                         "keepsyms=1 debug=0x108 serial=3 -v")
+        self.assertEqual(args(verbose=True, boot_args="cpus=1"),
+                         "keepsyms=1 debug=0x100 -v cpus=1")
+        self.assertEqual(args(verbose=True, serial_log=True, boot_args="-x"),
+                         "keepsyms=1 debug=0x108 serial=3 -v -x")
+
+    def test_a_typed_dash_v_is_kept_once(self):
+        def args(**kw):
+            return self.build(machine(**kw))["NVRAM"]["Add"][APPLE]["boot-args"]
+        self.assertEqual(args(boot_args="-v"), "keepsyms=1 debug=0x100 -v")
+        self.assertEqual(args(verbose=True, boot_args="cpus=1 -v"),
+                         "keepsyms=1 debug=0x100 cpus=1 -v")
+        self.assertEqual(args(verbose=True, boot_args="-v").split().count("-v"), 1)
+
+    def test_the_standard_card_adds_no_device_properties(self):
+        d = self.build(machine(gpu="std"))["DeviceProperties"]
+        self.assertEqual((d["Add"], d["Delete"]), ({}, {}))
+
+    def test_the_x1900_device_properties(self):
+        cfg = self.build(machine(gpu="x1900"))
+        add = cfg["DeviceProperties"]["Add"]
+        self.assertEqual(list(add), ["PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)"])
+        p = add["PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)"]
+        fb = "ATY,Alopias"
+        want = {
+            "name": fb + "Parent", "device_type": fb + "Parent",
+            "model": "ATI Radeon X1900 XT",
+            "VRAM,totalsize": bytes.fromhex("00000010"),
+            "ATY,Copyright": b"Copyright ATI Technologies Inc. 2005",
+            "ATY,EFIVersion": b"01.00.068",
+            "ATY,Rom#": b"113-A52025-xxx",
+            "ATY,Card#": b"109-A52025-00",
+            "ATY,PlatformInfo": bytes(128),
+            "device-id": bytes.fromhex("48720000"),
+        }
+        for i in (0, 1):
+            want.update({f"@{i},name": fb, f"@{i},compatible": fb, f"@{i},device_type": "display"})
+        self.assertEqual(p, want)
+        for k, v in want.items():
+            self.assertIs(type(p[k]), type(v), k)
+
+    def test_the_x1900_fixes_the_boot_screen_size(self):
+        for res in model.RESOLUTIONS:
+            out = self.build(machine(gpu="x1900", resolution=res))["UEFI"]["Output"]
+            self.assertEqual(out["Resolution"], "1024x768", res)
+        for res in model.RESOLUTIONS:
+            out = self.build(machine(gpu="std", resolution=res))["UEFI"]["Output"]
+            self.assertEqual(out["Resolution"], res)
 
     def test_nvram_section(self):
         nv = self.build()["NVRAM"]

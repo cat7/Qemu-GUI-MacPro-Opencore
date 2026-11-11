@@ -8,6 +8,7 @@ Run:  python -m unittest discover -s tests
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -131,11 +132,41 @@ class DisplayAndBoot(EditorCase):
         self.assertEqual((got.show_picker, got.serial_log, got.boot_args, got.resolution),
                          (True, True, "cpus=1 -x", "1920x1200"))
 
-    def test_verbose_is_refused_on_save(self):
+    def test_verbose_in_the_extra_arguments_is_accepted(self):
         ed = self._editor(Machine(name="t"))
         ed.boot_args_var.set("-v")
         errors, _ = model.validate(ed.collect(), None, "darwin", check_files=False)
-        self.assertTrue(any("-v" in e for e in errors), errors)
+        self.assertEqual(errors, [])
+
+    def test_verbose_checkbox(self):
+        ed = self._editor(Machine(name="t"))
+        self.assertFalse(ed.verbose_var.get())
+        self.assertFalse(ed.collect().verbose)
+        ed.verbose_var.set(True)
+        self.assertTrue(ed.collect().verbose)
+        self.assertTrue(self._editor(Machine(name="t", verbose=True)).verbose_var.get())
+
+    def test_graphics_card_choice(self):
+        ed = self._editor(Machine(name="t"))
+        self.assertEqual(ed.gpu_var.get(), "Standard VGA")
+        self.assertEqual(ed.collect().gpu, "std")
+        self.assertEqual(str(ed.resolution_cb.cget("state")), "readonly")
+        self.assertEqual(list(ed.gpu_cb.cget("values")),
+                         ["Standard VGA", "ATI Radeon X1900 XT (no acceleration yet)"])
+        ed.gpu_var.set("ATI Radeon X1900 XT (no acceleration yet)")
+        ed._gpu_changed()
+        got = ed.collect()
+        self.assertEqual((got.gpu, got.resolution), ("x1900", "1024x768"))
+        self.assertEqual(str(ed.resolution_cb.cget("state")), "disabled")
+        ed.gpu_var.set("Standard VGA")
+        ed._gpu_changed()
+        self.assertEqual(str(ed.resolution_cb.cget("state")), "readonly")
+
+    def test_a_saved_x1900_loads_with_the_size_locked(self):
+        ed = self._editor(Machine(name="t", gpu="x1900", resolution="1920x1200"))
+        self.assertEqual(ed.gpu_var.get(), "ATI Radeon X1900 XT (no acceleration yet)")
+        self.assertEqual(ed.resolution_var.get(), "1024x768")
+        self.assertEqual(str(ed.resolution_cb.cget("state")), "disabled")
 
     def test_vnc_switch(self):
         ed = self._editor(Machine(name="t"))
@@ -376,7 +407,7 @@ class KeyFileSetting(MainWindowCase):
         w.key_var.set(str(other))
         w.key_file_changed()
         saved = (Path(self.td.name) / "settings.json").read_text()
-        self.assertIn(str(other), saved)
+        self.assertIn(str(other), json.loads(saved).values())
         self.assertNotIn("y" * 64, saved)
         self.assertNotIn("x" * 64, saved)
         self.assertIn(str(other), w.command_line.get("1.0", "end"))
@@ -441,13 +472,15 @@ class SpawnPerHost(MainWindowCase):
 
     def test_other_hosts_run_the_launcher_with_bash_into_the_log(self):
         run = self.start("linux")
-        self.addCleanup(run._log_fh.close)
-        argv, kw = self.calls[0]
-        self.assertEqual(argv[0], "/bin/bash")
-        self.assertTrue(str(argv[1]).endswith("run.command"))
-        self.assertNotIn("creationflags", kw)
-        self.assertIsNotNone(kw["stdout"])
-        self.assertNotIn(support.DUMMY_KEY, run.log_path.read_text())
+        try:
+            argv, kw = self.calls[0]
+            self.assertEqual(argv[0], "/bin/bash")
+            self.assertTrue(str(argv[1]).endswith("run.command"))
+            self.assertNotIn("creationflags", kw)
+            self.assertIsNotNone(kw["stdout"])
+            self.assertNotIn(support.DUMMY_KEY, run.log_path.read_text())
+        finally:
+            run._log_fh.close()
 
 
 if __name__ == "__main__":

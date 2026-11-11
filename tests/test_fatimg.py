@@ -238,6 +238,7 @@ class ImageLayout(unittest.TestCase):
         fs = Fat16(fatimg.build_image(self.src))
         self.assertEqual(fs.tree()["Résumé über.txt"], b"u")
 
+    @unittest.skipIf(sys.platform == "win32", "path longer than MAX_PATH")
     def test_a_name_of_255_characters(self):
         name = "n" * 251 + ".bin"
         make_tree(self.src, {name: b"long"})
