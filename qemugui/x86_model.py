@@ -107,7 +107,7 @@ RESOLUTION_DEFAULT = "1440x900"
 GPU_STD = "std"
 GPU_X1900 = "x1900"
 GPU_LABELS = {GPU_STD: "Standard VGA",
-              GPU_X1900: "ATI Radeon X1900 XT (no acceleration yet)"}
+              GPU_X1900: "ATI Radeon X1900 XT"}
 GPUS = tuple(GPU_LABELS)
 GPU_DEFAULT = GPU_STD
 # the only mode the X1900 firmware driver offers

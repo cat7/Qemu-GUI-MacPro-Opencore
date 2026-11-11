@@ -163,10 +163,9 @@ class Settings(Case):
             "VRAM,totalsize": bytes.fromhex("00000010"),
             "ATY,Copyright": b"Copyright ATI Technologies Inc. 2005",
             "ATY,EFIVersion": b"01.00.068",
-            "ATY,Rom#": b"113-A52025-xxx",
-            "ATY,Card#": b"109-A52025-00",
+            "ATY,Rom#": b"113-A52027-202",
+            "ATY,Card#": b"109-A52027-00",
             "ATY,PlatformInfo": bytes(128),
-            "device-id": bytes.fromhex("48720000"),
         }
         for i in (0, 1):
             want.update({f"@{i},name": fb, f"@{i},compatible": fb, f"@{i},device_type": "display"})

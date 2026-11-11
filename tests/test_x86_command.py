@@ -74,7 +74,7 @@ MAC_ARGV = [
     "-drive", "id=sata2,if=none,format=raw,readonly=on,media=cdrom,file=/images/10.5.iso",
     "-device", "ide-cd,bus=ide.2,drive=sata2",
     "-device", "piix3-usb-uhci,id=uhci", "-device", "usb-kbd,bus=uhci.0",
-    "-device", "usb-tablet,bus=uhci.0",
+    "-device", "usb-tablet,bus=uhci.0,axis-inset=75",
     "-netdev", "user,id=n0",
     "-device", "e1000-82545em,netdev=n0,mac=52:54:00:12:34:56",
 ]
@@ -109,7 +109,7 @@ OSK="$(cat '{KEY}')"
 -device ide-cd,bus=ide.2,drive=sata2 \\
 -device piix3-usb-uhci,id=uhci \\
 -device usb-kbd,bus=uhci.0 \\
--device usb-tablet,bus=uhci.0 \\
+-device usb-tablet,bus=uhci.0,axis-inset=75 \\
 -netdev user,id=n0 \\
 -device e1000-82545em,netdev=n0,mac=52:54:00:12:34:56
 """
@@ -147,7 +147,7 @@ RUN_BAT = "\r\n".join([
     '-device "ide-cd,bus=ide.2,drive=sata2" ^',
     '-device "piix3-usb-uhci,id=uhci" ^',
     '-device "usb-kbd,bus=uhci.0" ^',
-    '-device "usb-tablet,bus=uhci.0" ^',
+    '-device "usb-tablet,bus=uhci.0,axis-inset=75" ^',
     '-netdev "user,id=n0" ^',
     '-device "e1000-82545em,netdev=n0,mac=52:54:00:12:34:56"',
     "",
@@ -270,7 +270,7 @@ class Pieces(unittest.TestCase):
     def test_tablet_off_is_a_mouse(self):
         devices = option(argv_of(plain(usb_tablet=False)), "-device")
         self.assertIn("usb-mouse,bus=uhci.0", devices)
-        self.assertNotIn("usb-tablet,bus=uhci.0", devices)
+        self.assertNotIn("usb-tablet,bus=uhci.0,axis-inset=75", devices)
 
     def test_vnc(self):
         argv = argv_of(plain(vnc=":5"))
@@ -528,7 +528,7 @@ class Record(unittest.TestCase):
 
     def test_labels(self):
         self.assertEqual(model.gpu_label("std"), "Standard VGA")
-        self.assertEqual(model.gpu_label("x1900"), "ATI Radeon X1900 XT (no acceleration yet)")
+        self.assertEqual(model.gpu_label("x1900"), "ATI Radeon X1900 XT")
         for g in model.GPUS:
             self.assertEqual(model.gpu_by_label(model.gpu_label(g)), g)
 

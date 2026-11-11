@@ -152,8 +152,8 @@ class DisplayAndBoot(EditorCase):
         self.assertEqual(ed.collect().gpu, "std")
         self.assertEqual(str(ed.resolution_cb.cget("state")), "readonly")
         self.assertEqual(list(ed.gpu_cb.cget("values")),
-                         ["Standard VGA", "ATI Radeon X1900 XT (no acceleration yet)"])
-        ed.gpu_var.set("ATI Radeon X1900 XT (no acceleration yet)")
+                         ["Standard VGA", "ATI Radeon X1900 XT"])
+        ed.gpu_var.set("ATI Radeon X1900 XT")
         ed._gpu_changed()
         got = ed.collect()
         self.assertEqual((got.gpu, got.resolution), ("x1900", "1024x768"))
@@ -164,7 +164,7 @@ class DisplayAndBoot(EditorCase):
 
     def test_a_saved_x1900_loads_with_the_size_locked(self):
         ed = self._editor(Machine(name="t", gpu="x1900", resolution="1920x1200"))
-        self.assertEqual(ed.gpu_var.get(), "ATI Radeon X1900 XT (no acceleration yet)")
+        self.assertEqual(ed.gpu_var.get(), "ATI Radeon X1900 XT")
         self.assertEqual(ed.resolution_var.get(), "1024x768")
         self.assertEqual(str(ed.resolution_cb.cget("state")), "disabled")
 

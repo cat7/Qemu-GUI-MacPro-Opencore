@@ -61,14 +61,12 @@ def x1900_properties() -> dict:
         "VRAM,totalsize": (256 << 20).to_bytes(4, "little"),
         "ATY,Copyright": b"Copyright ATI Technologies Inc. 2005",
         "ATY,EFIVersion": b"01.00.068",
-        "ATY,Rom#": b"113-A52025-xxx",
-        "ATY,Card#": b"109-A52025-00",
+        "ATY,Rom#": b"113-A52027-202",
+        "ATY,Card#": b"109-A52027-00",
         "ATY,PlatformInfo": bytes(128),
     }
     for i in (0, 1):
         props.update({f"@{i},name": fb, f"@{i},compatible": fb, f"@{i},device_type": "display"})
-    # keeps ATIRadeonX1000 from matching until R500 3D works
-    props["device-id"] = bytes.fromhex("48720000")
     return props
 
 
