@@ -48,6 +48,11 @@ HDA_PROPERTIES = {
         "f000004060e1450120e1c501"),
 }
 
+# first analogue output of the codec, at -15 dB when the guest has stored no volume
+CHIME_AUDIO = dict(AudioSupport=True, AudioDevice=HDA_PATH, AudioCodec=0, AudioOutMask=1,
+                   PlayChime="Enabled")
+CHIME_VOLUME_DB = bytes([0xF1])
+
 
 class EspError(OSError):
     pass
@@ -120,7 +125,16 @@ def builtin_audio_in_effect(m: Machine) -> bool:
     return x86_command.builtin_audio_added(m, paths.split_extra_args(m.extra_args))
 
 
-def make_config(m: Machine, sample: dict, kexts: list[Path]) -> dict:
+def chime_in_effect(m: Machine, opencore_dir: Path | str) -> bool:
+    """True when *m* plays the startup chime: the option is on, the built-in
+    audio is there and the OpenCore folder holds the driver and the sound."""
+    oc = Path(opencore_dir)
+    return (m.startup_chime and builtin_audio_in_effect(m)
+            and (oc / "X64/EFI/OC/Drivers" / paths.OPENCORE_AUDIO_DRIVER).is_file()
+            and (oc / paths.OPENCORE_CHIME).is_file())
+
+
+def make_config(m: Machine, sample: dict, kexts: list[Path], chime: bool = False) -> dict:
     """The OpenCore config for *m*, from a loaded Sample.plist."""
     p = {k: v for k, v in sample.items() if not k.startswith("#")}
     arch = m.kernel_arch
@@ -175,6 +189,8 @@ def make_config(m: Machine, sample: dict, kexts: list[Path]) -> dict:
     nvram_add[APPLE_NVRAM_GUID] = {"boot-args": boot_args(m),
                                    "csr-active-config": b"\x00\x00\x00\x00",
                                    "prev-lang:kbd": b"en:0", "run-efi-updater": "No"}
+    if chime:
+        nvram_add[APPLE_NVRAM_GUID]["SystemAudioVolumeDB"] = CHIME_VOLUME_DB
     _section(nvram, "Delete")[APPLE_NVRAM_GUID] = ["boot-args", "csr-active-config",
                                                   "prev-lang:kbd"]
     nvram["WriteFlash"] = True
@@ -187,7 +203,10 @@ def make_config(m: Machine, sample: dict, kexts: list[Path]) -> dict:
 
     uefi = _section(p, "UEFI")
     uefi["Drivers"] = [dict(Arguments="", Comment="", Enabled=True, HideVerbose=False,
-                            LoadEarly=False, Path=d) for d in paths.OPENCORE_DRIVERS]
+                            LoadEarly=False, Path=d)
+                       for d in paths.OPENCORE_DRIVERS
+                       + ((paths.OPENCORE_AUDIO_DRIVER,) if chime else ())]
+    _section(uefi, "Audio").update(CHIME_AUDIO if chime else dict(AudioSupport=False))
     _section(uefi, "Quirks")["RequestBootVarRouting"] = True
     resolution = model.GPU_X1900_RESOLUTION if m.gpu == model.GPU_X1900 else m.resolution
     _section(uefi, "Output").update(ProvideConsoleGop=True, Resolution=resolution,
@@ -210,7 +229,8 @@ def build_esp(m: Machine, install_dir: Path | str, out: Path | str) -> Path:
     except (OSError, ValueError, plistlib.InvalidFileException) as e:
         raise EspError(f"The OpenCore Sample.plist cannot be read: {e}")
     kexts = kext_dirs(install / paths.KEXTS_DIR_NAME)
-    config = make_config(m, sample, kexts)
+    chime = chime_in_effect(m, oc)
+    config = make_config(m, sample, kexts, chime)
 
     shutil.rmtree(out, ignore_errors=True)
     for d in ("EFI/BOOT", "EFI/OC/Drivers", "EFI/OC/Kexts", "EFI/OC/ACPI", "EFI/OC/Tools",
@@ -220,8 +240,12 @@ def build_esp(m: Machine, install_dir: Path | str, out: Path | str) -> Path:
     shutil.copyfile(oc / paths.OPENCORE_BOOT_EFI, out / "EFI/BOOT/BOOTx64.efi")
     (out / "EFI/BOOT/.contentVisibility").write_text(CONTENT_VISIBILITY, encoding="ascii")
     shutil.copyfile(oc / paths.OPENCORE_MAIN_EFI, out / "EFI/OC/OpenCore.efi")
-    for d in paths.OPENCORE_DRIVERS:
+    for d in paths.OPENCORE_DRIVERS + ((paths.OPENCORE_AUDIO_DRIVER,) if chime else ()):
         shutil.copyfile(efi / "OC/Drivers" / d, out / "EFI/OC/Drivers" / d)
+    if chime:
+        (out / "EFI/OC/Resources/Audio").mkdir()
+        shutil.copyfile(oc / paths.OPENCORE_CHIME,
+                        out / "EFI/OC/Resources/Audio" / Path(paths.OPENCORE_CHIME).name)
     shutil.copyfile(oc / paths.OPENCORE_TOOL, out / "EFI/OC/Tools/OpenShell.efi")
     for k in kexts:
         shutil.copytree(k, out / "EFI/OC/Kexts" / k.name)

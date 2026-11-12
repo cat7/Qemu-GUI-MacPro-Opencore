@@ -459,9 +459,12 @@ class MachineEditor(tk.Toplevel):
         self.builtin_audio_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text="Built-in audio (Mac Pro sound output and line in)",
                         variable=self.builtin_audio_var).grid(row=1, column=0, sticky="w")
+        self.startup_chime_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f, text="Startup chime (needs built-in audio)",
+                        variable=self.startup_chime_var).grid(row=2, column=0, sticky="w")
         self.usb_audio_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="USB audio device (sound out and microphone in)",
-                        variable=self.usb_audio_var).grid(row=2, column=0, sticky="w")
+                        variable=self.usb_audio_var).grid(row=3, column=0, sticky="w")
         if paths.HOST_PLATFORM == "darwin":
             self._build_usb_host(f)
         elif paths.is_windows(paths.HOST_PLATFORM):
@@ -726,6 +729,7 @@ class MachineEditor(tk.Toplevel):
             gp.set(r.guest_port)
         self._net_mode_changed()
         self.builtin_audio_var.set(m.builtin_audio)
+        self.startup_chime_var.set(m.startup_chime)
         self.usb_audio_var.set(m.usb_audio)
         self.usb_tablet_var.set(m.usb_tablet)
         self.share_folder_var.set(m.share.folder)
@@ -768,6 +772,7 @@ class MachineEditor(tk.Toplevel):
                for p, h, g, _w in self.fwd_rows]
         m.network = Network(mode, self.mac_var.get().strip(), ifname, fwd)
         m.builtin_audio = self.builtin_audio_var.get()
+        m.startup_chime = self.startup_chime_var.get()
         m.usb_audio = self.usb_audio_var.get()
         m.usb_tablet = self.usb_tablet_var.get()
         m.share = Share(self.share_folder_var.get().strip(), self.share_user_var.get().strip(),

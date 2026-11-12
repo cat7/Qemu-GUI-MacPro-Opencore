@@ -39,6 +39,9 @@ OPENCORE_BOOT_EFI = "X64/EFI/BOOT/BOOTx64.efi"
 OPENCORE_MAIN_EFI = "X64/EFI/OC/OpenCore.efi"
 OPENCORE_DRIVERS = ("OpenRuntime.efi", "OpenHfsPlus.efi", "OpenPartitionDxe.efi",
                     "ResetNvramEntry.efi")
+# optional: both present and the machine plays a chime at startup
+OPENCORE_AUDIO_DRIVER = "AudioDxe.efi"
+OPENCORE_CHIME = "X64/EFI/OC/Resources/Audio/OCEFIAudio_VoiceOver_Boot.mp3"
 OPENCORE_TOOL = "X64/EFI/OC/Tools/OpenShell.efi"
 OPENCORE_SAMPLE_PLIST = "Docs/Sample.plist"
 OPENCORE_FILES = (OPENCORE_BOOT_EFI, OPENCORE_MAIN_EFI,

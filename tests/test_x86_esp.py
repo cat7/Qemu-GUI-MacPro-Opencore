@@ -231,6 +231,49 @@ class Settings(Case):
         self.assertEqual(patch["TableSignature"], b"DSDT")
         self.assertTrue(patch["Enabled"])
 
+    def add_chime_files(self):
+        oc = self.install / paths.OPENCORE_DIR_NAME
+        (oc / "X64/EFI/OC/Drivers" / paths.OPENCORE_AUDIO_DRIVER).write_bytes(b"driver")
+        (oc / paths.OPENCORE_CHIME).parent.mkdir(parents=True, exist_ok=True)
+        (oc / paths.OPENCORE_CHIME).write_bytes(b"chime")
+
+    def test_startup_chime(self):
+        self.add_chime_files()
+        cfg = self.build(machine(builtin_audio=True))
+        u = cfg["UEFI"]
+        self.assertEqual([d["Path"] for d in u["Drivers"]],
+                         list(paths.OPENCORE_DRIVERS) + ["AudioDxe.efi"])
+        audio = u["Audio"]
+        self.assertTrue(audio["AudioSupport"])
+        self.assertEqual(audio["AudioDevice"], "PciRoot(0x0)/Pci(0x1b,0x0)")
+        self.assertEqual((audio["AudioCodec"], audio["AudioOutMask"]), (0, 1))
+        self.assertEqual(audio["PlayChime"], "Enabled")
+        nv = cfg["NVRAM"]["Add"]["7C436110-AB2A-4BBB-A880-FE41995C9F82"]
+        self.assertEqual(nv["SystemAudioVolumeDB"], b"\xf1")
+        self.assertEqual((self.out / "EFI/OC/Drivers/AudioDxe.efi").read_bytes(), b"driver")
+        self.assertEqual((self.out / "EFI/OC/Resources/Audio/OCEFIAudio_VoiceOver_Boot.mp3")
+                         .read_bytes(), b"chime")
+
+    def test_no_startup_chime(self):
+        def off(cfg):
+            self.assertFalse(cfg["UEFI"]["Audio"]["AudioSupport"])
+            self.assertEqual([d["Path"] for d in cfg["UEFI"]["Drivers"]],
+                             list(paths.OPENCORE_DRIVERS))
+            self.assertNotIn("SystemAudioVolumeDB",
+                             cfg["NVRAM"]["Add"]["7C436110-AB2A-4BBB-A880-FE41995C9F82"])
+            self.assertFalse((self.out / "EFI/OC/Resources/Audio").exists())
+        off(self.build(machine(builtin_audio=True)))
+        self.add_chime_files()
+        off(self.build(machine(builtin_audio=True, startup_chime=False)))
+        off(self.build(machine(builtin_audio=False)))
+        (self.install / paths.OPENCORE_DIR_NAME / paths.OPENCORE_CHIME).unlink()
+        off(self.build(machine(builtin_audio=True)))
+
+    def test_startup_chime_round_trip_and_default(self):
+        self.assertTrue(Machine.from_dict({"name": "old"}).startup_chime)
+        m = machine(startup_chime=False)
+        self.assertFalse(Machine.from_json(m.to_json()).startup_chime)
+
     def test_builtin_audio_device_properties_and_acpi_patch(self):
         cfg = self.build(machine(builtin_audio=True))
         add = cfg["DeviceProperties"]["Add"]
