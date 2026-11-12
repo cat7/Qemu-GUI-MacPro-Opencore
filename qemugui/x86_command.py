@@ -120,12 +120,12 @@ def gpu_tokens(m: Machine, qemu_dir: str, platform: str) -> list[str]:
 
 
 def build_argv(m: Machine, qemu_dir: str, machine_dir: str,
-               platform: str = paths.HOST_PLATFORM, owned=None, late=()) -> list[str]:
+               platform: str = paths.HOST_PLATFORM, owned=None) -> list[str]:
     """The complete argv, first token = absolute path of the QEMU binary.
     The SMC key is a run-time reference (see ``paths.runtime_ref``), never
     the key. *owned*: on Windows, the ids of the devices QEMU owns now (on
     WinUSB); only those of the ticked devices are passed through, none
-    without it. *late*: the ids of the devices the firmware must not see."""
+    without it."""
     qd = qemu_dir
     argv: list[str] = [paths.join_path(qd, paths.qemu_binary_name(platform), platform)]
 
@@ -169,11 +169,10 @@ def build_argv(m: Machine, qemu_dir: str, machine_dir: str,
     if m.serial_log:
         argv += ["-serial", "file:" + _path(model.SERIAL_LOG, machine_dir, platform)]
     if platform == "darwin":
-        argv += usbhost.qemu_tokens([(u.id, u.speed) for u in m.usb_host_devices], late)
+        argv += usbhost.qemu_tokens([(u.id, u.speed) for u in m.usb_host_devices])
     elif paths.is_windows(platform) and owned:
-        # Windows cannot see the disc of a drive it has handed to WinUSB
         argv += usbhost.qemu_tokens([(u.id, u.speed) for u in m.usb_host_devices
-                                     if u.id in owned], probe=True)
+                                     if u.id in owned])
     if m.rtc_base.strip():
         argv += ["-rtc", f"base={m.rtc_base.strip()}"]
     argv += extra
@@ -208,9 +207,8 @@ def render_launcher(argv: list[str], platform: str = paths.HOST_PLATFORM, sudo: 
 
 
 def launcher_text(m: Machine, qemu_dir: str, machine_dir: str,
-                  platform: str = paths.HOST_PLATFORM, owned=None, key_file=None,
-                  late=()) -> str:
-    return render_launcher(build_argv(m, qemu_dir, machine_dir, platform, owned, late), platform,
+                  platform: str = paths.HOST_PLATFORM, owned=None, key_file=None) -> str:
+    return render_launcher(build_argv(m, qemu_dir, machine_dir, platform, owned), platform,
                            needs_sudo(m, platform), extra_count(m, platform), m.name, key_file)
 
 
@@ -224,14 +222,14 @@ def ensure_vars(machine_dir: str | Path, pc_bios_dir: str | Path) -> Path:
 
 
 def write_launcher(m: Machine, qemu_dir: str, machine_dir: str,
-                   platform: str = paths.HOST_PLATFORM, owned=None, key_file=None, late=()):
+                   platform: str = paths.HOST_PLATFORM, owned=None, key_file=None):
     """Writes the OpenCore disk (esp/, esp.img), the variable store when it
     is missing, and the launcher."""
     from . import x86_esp
     Path(machine_dir).mkdir(parents=True, exist_ok=True)
     ensure_vars(machine_dir, Path(qemu_dir) / PC_BIOS_DIR)
     x86_esp.write_esp(m, qemu_dir, machine_dir)
-    argv = build_argv(m, qemu_dir, machine_dir, platform, owned, late)
+    argv = build_argv(m, qemu_dir, machine_dir, platform, owned)
     text = render_launcher(argv, platform, needs_sudo(m, platform), extra_count(m, platform),
                            m.name, key_file)
     path = Path(machine_dir) / paths.launcher_name(platform)

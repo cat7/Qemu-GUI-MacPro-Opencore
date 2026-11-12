@@ -65,7 +65,6 @@ class HostDevice:
     hid_input: bool = False
     media: tuple = ()         # ((bsd name, optical), ...)
     iface_classes: tuple = ()  # bInterfaceClass of each interface
-    audio_cd: bool = False    # holds a disc with audio tracks only
 
     @property
     def label(self) -> str:
@@ -86,17 +85,6 @@ def _hid_input(node: dict) -> bool:
                 (pair.get("DeviceUsagePage"), pair.get("DeviceUsage")) in HID_INPUT_USAGES:
             return True
     return False
-
-
-def audio_only(toc: bytes) -> bool:
-    """True for an IOCDMedia TOC whose tracks are all audio. The TOC is a
-    4-byte header and 11-byte descriptors: session, ADR/control, TNO, point,
-    ...; a track has ADR 1 and point 1 to 99, control bit 2 marks data."""
-    if not isinstance(toc, (bytes, bytearray)):
-        return False
-    tracks = [toc[i + 1] & 0x0F for i in range(4, len(toc) - 10, 11)
-              if toc[i + 1] >> 4 == 1 and 1 <= toc[i + 3] <= 99]
-    return bool(tracks) and not any(control & 0x04 for control in tracks)
 
 
 def parse_ioreg(data: bytes) -> list[HostDevice]:
@@ -136,8 +124,6 @@ def parse_ioreg(data: bytes) -> list[HostDevice]:
                 dev.hid_input = True
             if node.get("IOObjectClass") in OPTICAL_CLASSES:
                 optical = True
-                if audio_only(node.get("TOC")):
-                    dev.audio_cd = True
             bsd = node.get("BSD Name")
             if isinstance(bsd, str) and "Whole" in node and "Content" in node:
                 dev.media += ((bsd, optical),)
@@ -186,17 +172,11 @@ def host_devices() -> list[HostDevice]:
     return judge(parse_ioreg(tree.stdout), parse_mounts(mounts.stdout))
 
 
-def audio_cd_ids(devices=None) -> set[str]:
-    """Ids of the plugged-in devices holding an audio CD."""
-    return {d.id for d in (host_devices() if devices is None else devices) if d.audio_cd}
-
-
-def qemu_tokens(devices, late=(), probe: bool = False) -> list[str]:
+def qemu_tokens(devices) -> list[str]:
     """-device usb-host for [(id, speed)], on the bus the speed picks; the
-    EHCI controller comes first when a device needs it. The ids in *late*
-    stay off the bus until the guest system runs the controller: the
-    firmware never gets past a drive holding an audio CD. With *probe* QEMU
-    looks for that disc itself, in every device."""
+    EHCI controller comes first when a device needs it. late-attach=auto:
+    QEMU keeps a drive holding an audio CD off the bus until the guest
+    system runs the controller; the firmware never gets past such a drive."""
     out: list[str] = []
     devices = list(devices)
     if any(bus_for_speed(speed) == BUS_HIGH_SPEED for _id, speed in devices):
@@ -205,6 +185,5 @@ def qemu_tokens(devices, late=(), probe: bool = False) -> list[str]:
         vid, pid = dev_id.split(":")
         out += ["-device", f"usb-host,vendorid=0x{vid},productid=0x{pid},"
                            f"bus={bus_for_speed(speed)}"
-                           + (",late-attach=on" if dev_id in late
-                              else ",late-attach=auto" if probe else "")]
+                           ",late-attach=auto"]
     return out

@@ -14,7 +14,6 @@ from . import x86_command as command
 from . import x86_model as model
 from . import x86_share as share
 from . import paths
-from . import usbhost
 from . import winusb
 from .x86_model import Machine, Library
 from .paths import Settings
@@ -80,8 +79,7 @@ def start_in_terminal(m: Machine, machine_dir: Path,
     folder stays up until the next start or quit."""
     machine_dir = Path(machine_dir)
     machine_dir.mkdir(parents=True, exist_ok=True)
-    launcher, _argv = command.write_launcher(m, qemu_dir(), str(machine_dir), key_file=key_file,
-                                             late=usb_late(m))
+    launcher, _argv = command.write_launcher(m, qemu_dir(), str(machine_dir), key_file=key_file)
     share_server = share.start_share(m) if m.share.ftp_on else None
     try:
         subprocess.Popen(["open", "-a", "Terminal", str(launcher)], cwd=str(machine_dir))
@@ -101,13 +99,6 @@ def usb_owned(m: Machine) -> tuple[set | None, str]:
     return owned, winusb.passthrough_note([u.id for u in m.usb_host_devices], owned, why)
 
 
-def usb_late(m: Machine) -> set:
-    """macOS: the ticked devices holding an audio CD now."""
-    if paths.HOST_PLATFORM != "darwin" or not m.usb_host_devices:
-        return set()
-    return usbhost.audio_cd_ids() & {u.id for u in m.usb_host_devices}
-
-
 def start_machine(m: Machine, machine_dir: Path, key_file: str | None = None) -> RunningMachine:
     """Write the launcher, start the shared folder, then run the launcher
     with the machine folder as the working directory, keeping everything
@@ -116,7 +107,7 @@ def start_machine(m: Machine, machine_dir: Path, key_file: str | None = None) ->
     machine_dir.mkdir(parents=True, exist_ok=True)
     owned, _note = usb_owned(m)
     launcher, argv = command.write_launcher(m, qemu_dir(), str(machine_dir), paths.HOST_PLATFORM,
-                                            owned, key_file, usb_late(m))
+                                            owned, key_file)
     log_path = machine_dir / LOG_NAME
     log_path.write_text("# " + " ".join(argv) + "\n", encoding="utf-8")
     windows = paths.is_windows(paths.HOST_PLATFORM)
@@ -346,7 +337,7 @@ class MainWindow(tk.Tk):
         owned, note = usb_owned(m)
         try:
             text = command.launcher_text(m, qemu_dir(), str(folder), paths.HOST_PLATFORM,
-                                         owned, self.key_file(), usb_late(m))
+                                         owned, self.key_file())
         except Exception as e:
             text = f"({e})"
         if note:
@@ -451,7 +442,7 @@ class MainWindow(tk.Tk):
         try:
             owned, _note = usb_owned(m)
             command.write_launcher(m, qemu_dir(), str(self.library.folder(m.name)),
-                                   paths.HOST_PLATFORM, owned, self.key_file(), usb_late(m))
+                                   paths.HOST_PLATFORM, owned, self.key_file())
         except OSError as e:
             messagebox.showerror(APP_TITLE, f"The start-up file could not be written.\n\n{e}")
 

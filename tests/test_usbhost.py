@@ -133,55 +133,9 @@ class Finding(unittest.TestCase):
         self.assertEqual(usbhost.bus_for_speed("low"), "uhci.0")
         self.assertEqual(usbhost.bus_for_speed(""), "uhci.0")
 
-    @staticmethod
-    def toc(*controls, lead=True):
-        """A raw TOC: one track per ADR/control byte, with the A0-A2 points."""
-        out = bytearray(4)
-        points = [(0x10 | controls[0], p) for p in (0xA0, 0xA1, 0xA2)] if lead else []
-        points += [(c, i + 1) for i, c in enumerate(controls)]
-        for control, point in points:
-            out += bytes([1, control, 0, point, 0, 0, 0, 0, 0, 2, 0])
-        return bytes(out)
-
-    def test_audio_only_toc(self):
-        self.assertTrue(usbhost.audio_only(self.toc(0x10, 0x10, 0x10)))
-        self.assertTrue(usbhost.audio_only(self.toc(0x11, lead=False)))   # pre-emphasis
-        self.assertFalse(usbhost.audio_only(self.toc(0x14)))              # data disc
-        self.assertFalse(usbhost.audio_only(self.toc(0x10, 0x10, 0x14)))  # mixed mode
-        self.assertFalse(usbhost.audio_only(self.toc(0x14, 0x10)))
-        self.assertFalse(usbhost.audio_only(bytes(4)))
-        self.assertFalse(usbhost.audio_only(b""))
-        self.assertFalse(usbhost.audio_only(None))
-
-    def test_audio_cd_in_a_drive(self):
-        def drive(toc):
-            cd = media("IOCDMedia", "disk5", True)
-            if toc is not None:
-                cd["TOC"] = toc
-            return dev(0x0e8d, 0x1887, "Drive", 2, 0x110000, [
-                {"IOObjectClass": "IOUSBMassStorageDriver", "IORegistryEntryChildren": [cd]}])
-
-        def ids(*roots):
-            return usbhost.audio_cd_ids(usbhost.parse_ioreg(plistlib.dumps(list(roots))))
-        self.assertEqual(ids(drive(self.toc(0x10, 0x10)), CAMERA), {"0e8d:1887"})
-        self.assertEqual(ids(drive(self.toc(0x14))), set())
-        self.assertEqual(ids(drive(None)), set())
-        self.assertEqual(ids(DVD, CAMERA), set())
-
-    def test_late_attach_tokens(self):
-        two = usbhost.qemu_tokens([("0e8d:1887", "high"), ("046d:0990", "high")],
-                                  late={"0e8d:1887"})
-        self.assertEqual(two[2:], [
-            "-device", "usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0,late-attach=on",
-            "-device", "usb-host,vendorid=0x046d,productid=0x0990,bus=ehci.0"])
-        m = Machine(name="L", usb_host_devices=[model.UsbHostDevice("0e8d:1887", "d", "high")])
-        self.assertIn("usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0,late-attach=on",
-                      command.build_argv(m, QD, MD, "darwin", late={"0e8d:1887"}))
-        self.assertNotIn("late-attach", " ".join(command.build_argv(m, QD, MD, "darwin")))
-
     def test_tokens_add_the_ehci_once_and_only_for_high_speed(self):
         self.assertEqual(usbhost.qemu_tokens([("0a12:0001", "full")]),
-                         ["-device", "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0"])
+                         ["-device", "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0,late-attach=auto"])
         two = usbhost.qemu_tokens([("0e8d:1887", "high"), ("046d:0990", "super")])
         self.assertEqual(two[:2], ["-device", "usb-ehci,id=ehci"])
         self.assertEqual(two.count("usb-ehci,id=ehci"), 1)
@@ -231,14 +185,14 @@ class Launcher(unittest.TestCase):
 
     def test_usb_host_options(self):
         argv = command.build_argv(self.machine(), QD, MD, "darwin")
-        i = argv.index("usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0")
+        i = argv.index("usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0,late-attach=auto")
         self.assertEqual(argv[i - 1], "-device")
         self.assertEqual(argv[i - 3:i - 1], ["-device", "usb-ehci,id=ehci"])
-        self.assertIn("usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0", argv)
+        self.assertIn("usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0,late-attach=auto", argv)
         self.assertEqual(argv[-2:], ["-d", "guest_errors"])
         # the controllers come before the devices that sit on them
         self.assertLess(argv.index("piix3-usb-uhci,id=uhci"), argv.index(
-            "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0"))
+            "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0,late-attach=auto"))
 
     def test_only_full_speed_devices_add_no_ehci(self):
         m = Machine(name="L", usb_host_devices=[UsbHostDevice("0a12:0001", "BT", "full")])
@@ -268,7 +222,6 @@ class Launcher(unittest.TestCase):
     def test_windows_only_devices_qemu_owns(self):
         m = self.machine()
         self.assertFalse(command.needs_sudo(m, "win32"))
-        # QEMU looks for an audio CD itself: Windows cannot see the disc
         dvd = "usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0,late-attach=auto"
         bt = "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0,late-attach=auto"
         # nothing known about ownership: nothing passed through
@@ -378,36 +331,6 @@ class EditorTab(unittest.TestCase):
         self.assertFalse(hasattr(ed, "usb_host_vars"))
         self.assertEqual(ed.collect().usb_host_devices, m.usb_host_devices)
 
-
-
-class EveryWriterChecksForAnAudioCd(unittest.TestCase):
-    """Each place the start-up file is written passes the audio CD ids on."""
-
-    def test_writers(self):
-        import inspect
-        import re
-        from qemugui import x86_ui_main as ui
-        src = inspect.getsource(ui)
-        calls = re.findall(r"command\.(?:write_launcher|launcher_text)\((.*?)\)\n", src, re.S)
-        self.assertGreaterEqual(len(calls), 4)
-        for c in calls:
-            self.assertIn("usb_late(m)", c, c)
-
-    def test_terminal_start_passes_it(self):
-        from unittest import mock
-        from qemugui import x86_ui_main as ui
-        m = Machine(name="T", usb_host_devices=[UsbHostDevice("0e8d:1887", "d", "high")])
-        seen = {}
-
-        def fake(m_, q, d, *a, **kw):
-            seen.update(kw)
-            return Path(d) / "run.command", []
-        with tempfile.TemporaryDirectory() as td, \
-                mock.patch.object(ui.command, "write_launcher", fake), \
-                mock.patch.object(ui, "usb_late", lambda m_: {"0e8d:1887"}), \
-                mock.patch.object(ui.subprocess, "Popen"):
-            ui.start_in_terminal(m, Path(td))
-        self.assertEqual(seen.get("late"), {"0e8d:1887"})
 
 
 if __name__ == "__main__":
