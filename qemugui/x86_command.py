@@ -134,7 +134,8 @@ def build_argv(m: Machine, qemu_dir: str, machine_dir: str,
     argv += ["-M", MACHINE_TYPE]
     argv += accel_tokens(m)
     argv += ["-m", str(int(m.ram_mb)), "-smp", model.smp_option(m.smp)]
-    argv += ["-global", "ICH9-LPC.disable_s3=1", "-global", "ICH9-LPC.disable_s4=1"]
+    argv += ["-global", "ICH9-LPC.disable_s3=1", "-global", "ICH9-LPC.disable_s4=1",
+             "-global", "mc146818rtc.ext-ram=on"]
     argv += ["-cpu", cpu_option(m, platform)]
     argv += ["-drive", "if=pflash,format=raw,readonly=on,file="
                        + qopt(_path(paths.OVMF_CODE_NAME, pc_bios, platform))]

@@ -61,6 +61,7 @@ MAC_ARGV = [
     "-accel", "tcg,thread=multi,tb-size=512",
     "-m", "2048", "-smp", "1",
     "-global", "ICH9-LPC.disable_s3=1", "-global", "ICH9-LPC.disable_s4=1",
+    "-global", "mc146818rtc.ext-ram=on",
     "-cpu", "Penryn,vendor=GenuineIntel,tsc-frequency=1200000000",
     "-drive", f"if=pflash,format=raw,readonly=on,file={QD}/pc-bios/edk2-x86_64-code.fd",
     "-drive", f"if=pflash,format=raw,file={MD}/OVMF_VARS.fd",
@@ -95,6 +96,7 @@ OSK="$(cat '{KEY}')"
 -smp 1 \\
 -global ICH9-LPC.disable_s3=1 \\
 -global ICH9-LPC.disable_s4=1 \\
+-global mc146818rtc.ext-ram=on \\
 -cpu Penryn,vendor=GenuineIntel,tsc-frequency=1200000000 \\
 -drive if=pflash,format=raw,readonly=on,file={QD}/pc-bios/edk2-x86_64-code.fd \\
 -drive if=pflash,format=raw,file={MD}/OVMF_VARS.fd \\
@@ -133,6 +135,7 @@ RUN_BAT = "\r\n".join([
     "-smp 1 ^",
     '-global ICH9-LPC.disable_s3=1 ^',
     '-global ICH9-LPC.disable_s4=1 ^',
+    '-global mc146818rtc.ext-ram=on ^',
     '-cpu "Penryn,vendor=GenuineIntel" ^',
     rf'-drive "if=pflash,format=raw,readonly=on,file={WQD}\pc-bios\edk2-x86_64-code.fd" ^',
     rf'-drive "if=pflash,format=raw,file={WMD}\OVMF_VARS.fd" ^',
@@ -356,7 +359,7 @@ class Pieces(unittest.TestCase):
 
     def test_the_order_of_the_options(self):
         flags = [g[0] for g in pairs(argv_of(default_with_two_drives()))]
-        want = ["-L", "-name", "-M", "-accel", "-m", "-smp", "-global", "-global", "-cpu",
+        want = ["-L", "-name", "-M", "-accel", "-m", "-smp", "-global", "-global", "-global", "-cpu",
                 "-drive", "-drive", "-smbios", "-device", "-vga", "-display", "-drive", "-device"]
         self.assertEqual(flags[:len(want)], want)
 

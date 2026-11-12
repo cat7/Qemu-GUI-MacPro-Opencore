@@ -221,15 +221,10 @@ class Settings(Case):
         for key in ("SetupVirtualMap", "DevirtualiseMmio", "ProtectUefiServices"):
             self.assertFalse(q[key], key)
 
-    def test_acpi_rtc_patch(self):
+    def test_acpi_has_no_rtc_patch(self):
         acpi = self.build()["ACPI"]
         self.assertEqual((acpi["Add"], acpi["Delete"]), ([], []))
-        (patch,) = acpi["Patch"]
-        self.assertEqual(patch["Base"], "\\_SB.PCI0.SF8.RTC")
-        self.assertEqual(patch["Find"], bytes.fromhex("4701700070000108"))
-        self.assertEqual(patch["Replace"], bytes.fromhex("4701700070000102"))
-        self.assertEqual(patch["TableSignature"], b"DSDT")
-        self.assertTrue(patch["Enabled"])
+        self.assertEqual(acpi["Patch"], [])
 
     def add_chime_files(self):
         oc = self.install / paths.OPENCORE_DIR_NAME
@@ -283,8 +278,7 @@ class Settings(Case):
                 "f000004050410101f0000040f0000040407021011031810130011390f0000040f0000040"
                 "f000004060e1450120e1c501")}})
         self.assertIs(type(add["PciRoot(0x0)/Pci(0x1b,0x0)"]["layout-id"]), bytes)
-        rtc, hdef = cfg["ACPI"]["Patch"]
-        self.assertEqual(rtc["Base"], "\\_SB.PCI0.SF8.RTC")
+        (hdef,) = cfg["ACPI"]["Patch"]
         want = dict(Base="", BaseSkip=0, Comment="SD8 to HDEF", Count=0, Enabled=True,
                     Find=b"SD8_", Limit=0, Mask=b"", OemTableId=bytes(8), Replace=b"HDEF",
                     ReplaceMask=b"", Skip=0, TableLength=0, TableSignature=b"DSDT")
@@ -293,12 +287,12 @@ class Settings(Case):
     def test_no_builtin_audio_properties_or_patch_when_off(self):
         cfg = self.build(machine(builtin_audio=False))
         self.assertEqual(cfg["DeviceProperties"]["Add"], {})
-        self.assertEqual(len(cfg["ACPI"]["Patch"]), 1)
+        self.assertEqual(cfg["ACPI"]["Patch"], [])
 
     def test_builtin_audio_from_extra_args_adds_nothing(self):
         cfg = self.build(machine(builtin_audio=True, extra_args="-device hda-alc885"))
         self.assertEqual(cfg["DeviceProperties"]["Add"], {})
-        self.assertEqual(len(cfg["ACPI"]["Patch"]), 1)
+        self.assertEqual(cfg["ACPI"]["Patch"], [])
 
     def test_builtin_audio_and_the_x1900_coexist(self):
         cfg = self.build(machine(gpu="x1900", builtin_audio=True))

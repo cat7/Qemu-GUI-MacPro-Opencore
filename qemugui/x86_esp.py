@@ -30,12 +30,6 @@ PICKER_TIMEOUT = 5
 # OpenCore's own disk is kept out of the picker
 CONTENT_VISIBILITY = "Disabled"
 
-# The second I/O port of the RTC is not decoded by q35
-RTC_PATCH = dict(Base="\\_SB.PCI0.SF8.RTC", BaseSkip=0, Comment="RTC: 2 ports (one CMOS bank)",
-                 Count=1, Enabled=True, Find=bytes.fromhex("4701700070000108"), Limit=0,
-                 Mask=b"", OemTableId=bytes(8), Replace=bytes.fromhex("4701700070000102"),
-                 ReplaceMask=b"", Skip=0, TableLength=0, TableSignature=b"DSDT")
-
 # SD8_ of the q35 DSDT is the HDEF the Mac OS X audio driver matches
 HDEF_PATCH = dict(Base="", BaseSkip=0, Comment="SD8 to HDEF", Count=0, Enabled=True,
                   Find=b"SD8_", Limit=0, Mask=b"", OemTableId=bytes(8), Replace=b"HDEF",
@@ -142,7 +136,7 @@ def make_config(m: Machine, sample: dict, kexts: list[Path], chime: bool = False
     acpi = _section(p, "ACPI")
     audio = builtin_audio_in_effect(m)
     acpi.update(Add=[], Delete=[],
-                Patch=[dict(RTC_PATCH)] + ([dict(HDEF_PATCH)] if audio else []))
+                Patch=[dict(HDEF_PATCH)] if audio else [])
 
     kernel = _section(p, "Kernel")
     kernel["Add"] = [dict(Arch="Any", BundlePath=k.name, Comment=k.stem, Enabled=True,

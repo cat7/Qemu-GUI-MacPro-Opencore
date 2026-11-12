@@ -98,7 +98,8 @@ class Audio(unittest.TestCase):
     def test_no_audio_without_the_usb_device(self):
         argv = command.build_argv(machine(None, cd("/a.iso")), QD, MD, "darwin")
         self.assertEqual(audiodevs(argv), [])
-        self.assertEqual(globals_(argv), ["ICH9-LPC.disable_s3=1", "ICH9-LPC.disable_s4=1"])
+        self.assertEqual(globals_(argv), ["ICH9-LPC.disable_s3=1", "ICH9-LPC.disable_s4=1",
+                                          "mc146818rtc.ext-ram=on"])
 
     def test_usb_audio_has_its_own_backend(self):
         m = machine()
