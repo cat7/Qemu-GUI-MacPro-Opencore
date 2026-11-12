@@ -171,8 +171,9 @@ def build_argv(m: Machine, qemu_dir: str, machine_dir: str,
     if platform == "darwin":
         argv += usbhost.qemu_tokens([(u.id, u.speed) for u in m.usb_host_devices], late)
     elif paths.is_windows(platform) and owned:
+        # Windows cannot see the disc of a drive it has handed to WinUSB
         argv += usbhost.qemu_tokens([(u.id, u.speed) for u in m.usb_host_devices
-                                     if u.id in owned])
+                                     if u.id in owned], probe=True)
     if m.rtc_base.strip():
         argv += ["-rtc", f"base={m.rtc_base.strip()}"]
     argv += extra

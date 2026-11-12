@@ -191,11 +191,12 @@ def audio_cd_ids(devices=None) -> set[str]:
     return {d.id for d in (host_devices() if devices is None else devices) if d.audio_cd}
 
 
-def qemu_tokens(devices, late=()) -> list[str]:
+def qemu_tokens(devices, late=(), probe: bool = False) -> list[str]:
     """-device usb-host for [(id, speed)], on the bus the speed picks; the
     EHCI controller comes first when a device needs it. The ids in *late*
     stay off the bus until the guest system runs the controller: the
-    firmware never gets past a drive holding an audio CD."""
+    firmware never gets past a drive holding an audio CD. With *probe* QEMU
+    looks for that disc itself, in every device."""
     out: list[str] = []
     devices = list(devices)
     if any(bus_for_speed(speed) == BUS_HIGH_SPEED for _id, speed in devices):
@@ -204,5 +205,6 @@ def qemu_tokens(devices, late=()) -> list[str]:
         vid, pid = dev_id.split(":")
         out += ["-device", f"usb-host,vendorid=0x{vid},productid=0x{pid},"
                            f"bus={bus_for_speed(speed)}"
-                           + (",late-attach=on" if dev_id in late else "")]
+                           + (",late-attach=on" if dev_id in late
+                              else ",late-attach=auto" if probe else "")]
     return out

@@ -268,8 +268,9 @@ class Launcher(unittest.TestCase):
     def test_windows_only_devices_qemu_owns(self):
         m = self.machine()
         self.assertFalse(command.needs_sudo(m, "win32"))
-        dvd = "usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0"
-        bt = "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0"
+        # QEMU looks for an audio CD itself: Windows cannot see the disc
+        dvd = "usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0,late-attach=auto"
+        bt = "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0,late-attach=auto"
         # nothing known about ownership: nothing passed through
         argv = command.build_argv(m, r"C:\q", r"C:\m", "win32")
         self.assertNotIn("usb-host", " ".join(argv))
