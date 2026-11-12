@@ -14,6 +14,7 @@ from . import x86_command as command
 from . import x86_model as model
 from . import x86_share as share
 from . import paths
+from . import usbhost
 from . import winusb
 from .x86_model import Machine, Library
 from .paths import Settings
@@ -99,6 +100,13 @@ def usb_owned(m: Machine) -> tuple[set | None, str]:
     return owned, winusb.passthrough_note([u.id for u in m.usb_host_devices], owned, why)
 
 
+def usb_late(m: Machine) -> set:
+    """macOS: the ticked devices holding an audio CD now."""
+    if paths.HOST_PLATFORM != "darwin" or not m.usb_host_devices:
+        return set()
+    return usbhost.audio_cd_ids() & {u.id for u in m.usb_host_devices}
+
+
 def start_machine(m: Machine, machine_dir: Path, key_file: str | None = None) -> RunningMachine:
     """Write the launcher, start the shared folder, then run the launcher
     with the machine folder as the working directory, keeping everything
@@ -107,7 +115,7 @@ def start_machine(m: Machine, machine_dir: Path, key_file: str | None = None) ->
     machine_dir.mkdir(parents=True, exist_ok=True)
     owned, _note = usb_owned(m)
     launcher, argv = command.write_launcher(m, qemu_dir(), str(machine_dir), paths.HOST_PLATFORM,
-                                            owned, key_file)
+                                            owned, key_file, usb_late(m))
     log_path = machine_dir / LOG_NAME
     log_path.write_text("# " + " ".join(argv) + "\n", encoding="utf-8")
     windows = paths.is_windows(paths.HOST_PLATFORM)
@@ -337,7 +345,7 @@ class MainWindow(tk.Tk):
         owned, note = usb_owned(m)
         try:
             text = command.launcher_text(m, qemu_dir(), str(folder), paths.HOST_PLATFORM,
-                                         owned, self.key_file())
+                                         owned, self.key_file(), usb_late(m))
         except Exception as e:
             text = f"({e})"
         if note:

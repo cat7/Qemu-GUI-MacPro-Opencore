@@ -133,6 +133,52 @@ class Finding(unittest.TestCase):
         self.assertEqual(usbhost.bus_for_speed("low"), "uhci.0")
         self.assertEqual(usbhost.bus_for_speed(""), "uhci.0")
 
+    @staticmethod
+    def toc(*controls, lead=True):
+        """A raw TOC: one track per ADR/control byte, with the A0-A2 points."""
+        out = bytearray(4)
+        points = [(0x10 | controls[0], p) for p in (0xA0, 0xA1, 0xA2)] if lead else []
+        points += [(c, i + 1) for i, c in enumerate(controls)]
+        for control, point in points:
+            out += bytes([1, control, 0, point, 0, 0, 0, 0, 0, 2, 0])
+        return bytes(out)
+
+    def test_audio_only_toc(self):
+        self.assertTrue(usbhost.audio_only(self.toc(0x10, 0x10, 0x10)))
+        self.assertTrue(usbhost.audio_only(self.toc(0x11, lead=False)))   # pre-emphasis
+        self.assertFalse(usbhost.audio_only(self.toc(0x14)))              # data disc
+        self.assertFalse(usbhost.audio_only(self.toc(0x10, 0x10, 0x14)))  # mixed mode
+        self.assertFalse(usbhost.audio_only(self.toc(0x14, 0x10)))
+        self.assertFalse(usbhost.audio_only(bytes(4)))
+        self.assertFalse(usbhost.audio_only(b""))
+        self.assertFalse(usbhost.audio_only(None))
+
+    def test_audio_cd_in_a_drive(self):
+        def drive(toc):
+            cd = media("IOCDMedia", "disk5", True)
+            if toc is not None:
+                cd["TOC"] = toc
+            return dev(0x0e8d, 0x1887, "Drive", 2, 0x110000, [
+                {"IOObjectClass": "IOUSBMassStorageDriver", "IORegistryEntryChildren": [cd]}])
+
+        def ids(*roots):
+            return usbhost.audio_cd_ids(usbhost.parse_ioreg(plistlib.dumps(list(roots))))
+        self.assertEqual(ids(drive(self.toc(0x10, 0x10)), CAMERA), {"0e8d:1887"})
+        self.assertEqual(ids(drive(self.toc(0x14))), set())
+        self.assertEqual(ids(drive(None)), set())
+        self.assertEqual(ids(DVD, CAMERA), set())
+
+    def test_late_attach_tokens(self):
+        two = usbhost.qemu_tokens([("0e8d:1887", "high"), ("046d:0990", "high")],
+                                  late={"0e8d:1887"})
+        self.assertEqual(two[2:], [
+            "-device", "usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0,late-attach=on",
+            "-device", "usb-host,vendorid=0x046d,productid=0x0990,bus=ehci.0"])
+        m = Machine(name="L", usb_host_devices=[model.UsbHostDevice("0e8d:1887", "d", "high")])
+        self.assertIn("usb-host,vendorid=0x0e8d,productid=0x1887,bus=ehci.0,late-attach=on",
+                      command.build_argv(m, QD, MD, "darwin", late={"0e8d:1887"}))
+        self.assertNotIn("late-attach", " ".join(command.build_argv(m, QD, MD, "darwin")))
+
     def test_tokens_add_the_ehci_once_and_only_for_high_speed(self):
         self.assertEqual(usbhost.qemu_tokens([("0a12:0001", "full")]),
                          ["-device", "usb-host,vendorid=0x0a12,productid=0x0001,bus=uhci.0"])
