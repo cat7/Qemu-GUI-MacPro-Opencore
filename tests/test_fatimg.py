@@ -267,6 +267,16 @@ class ImageLayout(unittest.TestCase):
         self.assertEqual(out.read_bytes(), self.img)
         self.assertFalse((Path(self.td.name) / "esp.img.tmp").exists())
 
+    def test_write_image_in_use_leaves_no_temporary_file(self):
+        from unittest import mock
+        out = Path(self.td.name) / "esp.img"
+        out.write_bytes(b"old")
+        with mock.patch.object(fatimg.os, "replace", side_effect=PermissionError("in use")):
+            with self.assertRaises(PermissionError):
+                fatimg.write_image(self.src, out)
+        self.assertEqual(out.read_bytes(), b"old")
+        self.assertFalse((Path(self.td.name) / "esp.img.tmp").exists())
+
     def test_a_label_and_a_size(self):
         data = fatimg.build_image(self.src, size_mb=32, label="mine")
         self.assertEqual(len(data), 32 << 20)

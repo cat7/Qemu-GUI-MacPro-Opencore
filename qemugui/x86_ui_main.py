@@ -435,7 +435,13 @@ class MainWindow(tk.Tk):
         self.library.save(m, old_name=old_name)
         if old_name != m.name:
             self.finished.pop(old_name, None)
-        self._write_launcher(m)
+        r = self.running.get(m.name)
+        if r is not None and r.poll() is None:
+            # its files are in use; every start writes them again
+            messagebox.showinfo(APP_TITLE, f"“{m.name}” is running. The changes are saved and "
+                                           "take effect the next time it starts.")
+        else:
+            self._write_launcher(m)
         self.refresh_list(select=m.name)
 
     def _write_launcher(self, m: Machine):

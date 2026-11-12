@@ -221,5 +221,10 @@ def write_image(folder: str | os.PathLike, image: str | os.PathLike, size_mb: in
     path = Path(image)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_bytes(data)
-    os.replace(tmp, path)
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        # Windows: a running machine holds the image open
+        tmp.unlink(missing_ok=True)
+        raise
     return path
