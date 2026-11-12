@@ -33,6 +33,7 @@ WQD, WMD, WKEY = r"C:\qemu-x86", r"C:\Machines\Leopard", r"C:\qemu-x86\OSK-Key.t
 def plain(**kw) -> Machine:
     kw.setdefault("name", "Leopard")
     kw.setdefault("display", "cocoa")
+    kw.setdefault("builtin_audio", False)
     kw.setdefault("uuid", "11111111-2222-3333-4444-555555555555")
     return Machine(**kw)
 
@@ -227,8 +228,40 @@ class GoldenCommandLines(unittest.TestCase):
         self.assertEqual(argv[argv.index("-smp") + 1], "2,sockets=2,cores=1,threads=1")
         self.assertEqual(argv[argv.index("-m") + 1], "3072")
         self.assertEqual(option(argv, "-serial"), [f"file:{MD}/serial.log"])
-        self.assertEqual(option(argv, "-audiodev"), ["coreaudio,id=usb"])
+        self.assertEqual(option(argv, "-audiodev"), ["coreaudio,id=hda0", "coreaudio,id=usb"])
         self.assertIn("usb-audio,audiodev=usb,bus=uhci.0", option(argv, "-device"))
+
+    def test_builtin_audio_argv(self):
+        argv = argv_of(plain(builtin_audio=True))
+        self.assertEqual(option(argv, "-audiodev"), ["coreaudio,id=hda0"])
+        devs = option(argv, "-device")
+        i = devs.index("esb2-intel-hda,id=hda,bus=pcie.0,addr=0x1b")
+        self.assertEqual(devs[i + 1], "hda-alc885,id=codec,bus=hda.0,audiodev=hda0")
+        w = argv_of(plain(builtin_audio=True), "win32", WQD, WMD)
+        self.assertEqual(option(w, "-audiodev"), ["dsound,id=hda0"])
+
+    def test_no_builtin_audio_when_off(self):
+        text = " ".join(argv_of(plain(builtin_audio=False)))
+        self.assertNotIn("hda", text)
+        self.assertNotIn("-audiodev", text)
+
+    def test_builtin_audio_from_extra_args_is_not_added_twice(self):
+        for extra in ("-device hda-alc885,audiodev=mine", "-device esb2-intel-hda,id=x"):
+            argv = argv_of(plain(builtin_audio=True, extra_args=extra))
+            self.assertEqual(option(argv, "-audiodev"), [], extra)
+            self.assertEqual(len([d for d in option(argv, "-device") if "hda" in d]), 1, extra)
+
+    def test_builtin_and_usb_audio_together(self):
+        argv = argv_of(plain(builtin_audio=True, usb_audio=True))
+        self.assertEqual(option(argv, "-audiodev"), ["coreaudio,id=hda0", "coreaudio,id=usb"])
+        devs = option(argv, "-device")
+        self.assertIn("hda-alc885,id=codec,bus=hda.0,audiodev=hda0", devs)
+        self.assertIn("usb-audio,audiodev=usb,bus=uhci.0", devs)
+
+    def test_builtin_audio_slot_is_unique_on_the_root_bus(self):
+        argv = argv_of(plain(builtin_audio=True, gpu="x1900", usb_audio=True))
+        slots = [d for d in option(argv, "-device") if "bus=pcie.0" in d and "addr=" in d]
+        self.assertEqual(sorted(s.split("addr=")[1].split(",")[0] for s in slots), ["0x1", "0x1b"])
 
     def test_the_argv_holds_a_reference_never_the_key(self):
         text = " ".join(argv_of(default_with_two_drives()))
@@ -525,6 +558,12 @@ class Record(unittest.TestCase):
             self.assertEqual((m.gpu, m.verbose), ("std", False))
         m = Machine.load(FIXTURES / "x86-minimal.json")
         self.assertEqual((m.gpu, m.verbose), ("std", False))
+
+    def test_builtin_audio_round_trip_and_default(self):
+        self.assertTrue(model.new_machine("t").builtin_audio)
+        self.assertTrue(Machine.from_dict({"name": "old"}).builtin_audio)
+        self.assertFalse(Machine.from_json(plain(builtin_audio=False).to_json()).builtin_audio)
+        self.assertTrue(Machine.from_json(plain(builtin_audio=True).to_json()).builtin_audio)
 
     def test_labels(self):
         self.assertEqual(model.gpu_label("std"), "Standard VGA")

@@ -28,6 +28,8 @@ CPU_TYPE = "Penryn,vendor=GenuineIntel"
 TCG_TSC_FREQUENCY = 1200000000
 TCG_ACCEL = "tcg,thread=multi,tb-size=512"
 USB_AUDIODEV = "usb"
+HDA_AUDIODEV = "hda0"
+HDA_SLOT = "0x1b"
 NETDEV_ID = "n0"
 SMC_VAR = "OSK"
 UHCI_BUS = "uhci.0"
@@ -68,6 +70,11 @@ def needs_sudo(m: Machine, platform: str = paths.HOST_PLATFORM) -> bool:
 
 def _usb_audio_added(m: Machine, extra: list[str]) -> bool:
     return m.usb_audio and not any(t.split(",")[0] == "usb-audio" for t in extra)
+
+
+def builtin_audio_added(m: Machine, extra: list[str]) -> bool:
+    return m.builtin_audio and not any(t.split(",")[0] in ("esb2-intel-hda", "hda-alc885")
+                                       for t in extra)
 
 
 def accel_tokens(m: Machine) -> list[str]:
@@ -149,6 +156,11 @@ def build_argv(m: Machine, qemu_dir: str, machine_dir: str,
     argv += ["-device", "piix3-usb-uhci,id=uhci", "-device", f"usb-kbd,bus={UHCI_BUS}",
              "-device", (f"usb-tablet,bus={UHCI_BUS},axis-inset={TABLET_INSET}" if m.usb_tablet
                          else f"usb-mouse,bus={UHCI_BUS}")]
+    if builtin_audio_added(m, extra):
+        audio = paths.resolve_audio("default", platform)
+        argv += ["-audiodev", f"{audio},id={HDA_AUDIODEV}",
+                 "-device", f"esb2-intel-hda,id=hda,bus=pcie.0,addr={HDA_SLOT}",
+                 "-device", f"hda-alc885,id=codec,bus=hda.0,audiodev={HDA_AUDIODEV}"]
     if _usb_audio_added(m, extra):
         audio = paths.resolve_audio("default", platform)
         argv += ["-audiodev", f"{audio},id={USB_AUDIODEV}",

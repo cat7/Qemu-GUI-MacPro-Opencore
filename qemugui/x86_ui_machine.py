@@ -456,25 +456,28 @@ class MachineEditor(tk.Toplevel):
         self.usb_tablet_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text="USB tablet (absolute pointer; off: a USB mouse)",
                         variable=self.usb_tablet_var).grid(row=0, column=0, sticky="w")
+        self.builtin_audio_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f, text="Built-in audio (Mac Pro sound output and line in)",
+                        variable=self.builtin_audio_var).grid(row=1, column=0, sticky="w")
         self.usb_audio_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="USB audio device (sound out and microphone in)",
-                        variable=self.usb_audio_var).grid(row=1, column=0, sticky="w")
+                        variable=self.usb_audio_var).grid(row=2, column=0, sticky="w")
         if paths.HOST_PLATFORM == "darwin":
             self._build_usb_host(f)
         elif paths.is_windows(paths.HOST_PLATFORM):
             self._build_usb_host_win(f)
 
     def _build_usb_host(self, f):
-        ttk.Separator(f).grid(row=2, column=0, sticky="ew", pady=10)
-        f.rowconfigure(4, weight=1)
+        ttk.Separator(f).grid(row=3, column=0, sticky="ew", pady=10)
+        f.rowconfigure(5, weight=1)
         ttk.Label(f, text="Host USB devices this Mac takes while it runs. With any device "
                           "ticked the machine starts with sudo and asks for your password. "
                           "High-speed devices go on a USB 2.0 controller added to the machine, "
                           "others on the USB 1.1 controller.",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
-            row=3, column=0, sticky="ew", pady=(0, 6))
+            row=4, column=0, sticky="ew", pady=(0, 6))
         self.usb_host_list = ttk.Frame(f)
-        self.usb_host_list.grid(row=4, column=0, sticky="nsew")
+        self.usb_host_list.grid(row=5, column=0, sticky="nsew")
         self.usb_host_vars: dict[str, tk.BooleanVar] = {}
         self.usb_host_info: dict[str, UsbHostDevice] = {}
         self.usb_host_boxes: dict[str, ttk.Checkbutton] = {}
@@ -531,19 +534,19 @@ class MachineEditor(tk.Toplevel):
     # Windows: QEMU opens only devices on WinUSB; winusb-switch moves them.
 
     def _build_usb_host_win(self, f):
-        ttk.Separator(f).grid(row=2, column=0, sticky="ew", pady=10)
-        f.rowconfigure(4, weight=1)
+        ttk.Separator(f).grid(row=3, column=0, sticky="ew", pady=10)
+        f.rowconfigure(5, weight=1)
         ttk.Label(f, text="Host USB devices this machine takes while it runs. QEMU can use a "
                           "device only while it is on Windows' WinUSB driver: Give to QEMU puts "
                           "it there, Give back to Windows returns it; each asks once for "
                           "administrator rights. High-speed devices go on a USB 2.0 controller "
                           "added to the machine, others on the USB 1.1 controller.",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
-            row=3, column=0, sticky="ew", pady=(0, 6))
+            row=4, column=0, sticky="ew", pady=(0, 6))
         self.usb_host_list = ttk.Frame(f)
-        self.usb_host_list.grid(row=4, column=0, sticky="nsew")
+        self.usb_host_list.grid(row=5, column=0, sticky="nsew")
         self.usb_status = ttk.Label(f, text="", wraplength=EDITOR_WIDTH - 60, justify="left")
-        self.usb_status.grid(row=5, column=0, sticky="ew", pady=(6, 0))
+        self.usb_status.grid(row=6, column=0, sticky="ew", pady=(6, 0))
         self._usb_win = True
         self.usb_busy = False
         self.usb_host_vars: dict[str, tk.BooleanVar] = {}
@@ -722,6 +725,7 @@ class MachineEditor(tk.Toplevel):
             hp.set(r.host_port)
             gp.set(r.guest_port)
         self._net_mode_changed()
+        self.builtin_audio_var.set(m.builtin_audio)
         self.usb_audio_var.set(m.usb_audio)
         self.usb_tablet_var.set(m.usb_tablet)
         self.share_folder_var.set(m.share.folder)
@@ -763,6 +767,7 @@ class MachineEditor(tk.Toplevel):
         fwd = [model.HostFwd(p.get(), h.get().strip(), g.get().strip())
                for p, h, g, _w in self.fwd_rows]
         m.network = Network(mode, self.mac_var.get().strip(), ifname, fwd)
+        m.builtin_audio = self.builtin_audio_var.get()
         m.usb_audio = self.usb_audio_var.get()
         m.usb_tablet = self.usb_tablet_var.get()
         m.share = Share(self.share_folder_var.get().strip(), self.share_user_var.get().strip(),

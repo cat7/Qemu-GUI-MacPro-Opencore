@@ -26,6 +26,7 @@ APPLE = "7C436110-AB2A-4BBB-A880-FE41995C9F82"
 def machine(**kw) -> Machine:
     kw.setdefault("name", "t")
     kw.setdefault("uuid", UUID)
+    kw.setdefault("builtin_audio", False)
     return Machine(**kw)
 
 
@@ -229,6 +230,39 @@ class Settings(Case):
         self.assertEqual(patch["Replace"], bytes.fromhex("4701700070000102"))
         self.assertEqual(patch["TableSignature"], b"DSDT")
         self.assertTrue(patch["Enabled"])
+
+    def test_builtin_audio_device_properties_and_acpi_patch(self):
+        cfg = self.build(machine(builtin_audio=True))
+        add = cfg["DeviceProperties"]["Add"]
+        self.assertEqual(add, {"PciRoot(0x0)/Pci(0x1b,0x0)": {
+            "layout-id": bytes.fromhex("0c000000"),
+            "PinConfigurations": bytes.fromhex(
+                "f000004050410101f0000040f0000040407021011031810130011390f0000040f0000040"
+                "f000004060e1450120e1c501")}})
+        self.assertIs(type(add["PciRoot(0x0)/Pci(0x1b,0x0)"]["layout-id"]), bytes)
+        rtc, hdef = cfg["ACPI"]["Patch"]
+        self.assertEqual(rtc["Base"], "\\_SB.PCI0.SF8.RTC")
+        want = dict(Base="", BaseSkip=0, Comment="SD8 to HDEF", Count=0, Enabled=True,
+                    Find=b"SD8_", Limit=0, Mask=b"", OemTableId=bytes(8), Replace=b"HDEF",
+                    ReplaceMask=b"", Skip=0, TableLength=0, TableSignature=b"DSDT")
+        self.assertEqual(hdef, want)
+
+    def test_no_builtin_audio_properties_or_patch_when_off(self):
+        cfg = self.build(machine(builtin_audio=False))
+        self.assertEqual(cfg["DeviceProperties"]["Add"], {})
+        self.assertEqual(len(cfg["ACPI"]["Patch"]), 1)
+
+    def test_builtin_audio_from_extra_args_adds_nothing(self):
+        cfg = self.build(machine(builtin_audio=True, extra_args="-device hda-alc885"))
+        self.assertEqual(cfg["DeviceProperties"]["Add"], {})
+        self.assertEqual(len(cfg["ACPI"]["Patch"]), 1)
+
+    def test_builtin_audio_and_the_x1900_coexist(self):
+        cfg = self.build(machine(gpu="x1900", builtin_audio=True))
+        add = cfg["DeviceProperties"]["Add"]
+        self.assertEqual(list(add), ["PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)",
+                                     "PciRoot(0x0)/Pci(0x1b,0x0)"])
+        self.assertEqual(add["PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)"], esp.x1900_properties())
 
     def test_uefi(self):
         u = self.build()["UEFI"]

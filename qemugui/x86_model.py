@@ -391,6 +391,7 @@ class Machine:
     drives: list = field(default_factory=lambda: [None] * len(DRIVE_SLOTS))
     network: Network = field(default_factory=Network)
     usb_tablet: bool = True        # False: usb-mouse
+    builtin_audio: bool = True     # esb2-intel-hda with an ALC885 codec
     usb_audio: bool = False
     usb_host_devices: list = field(default_factory=list)   # [UsbHostDevice]
     share: Share = field(default_factory=Share)
@@ -420,6 +421,7 @@ class Machine:
             "drives": [d.to_dict() if d else None for d in self.drives],
             "network": self.network.to_dict(),
             "usb_tablet": self.usb_tablet,
+            "builtin_audio": self.builtin_audio,
             "usb_audio": self.usb_audio,
             "usb_host_devices": [u.to_dict() for u in self.usb_host_devices],
             "share": self.share.to_dict(),
@@ -452,6 +454,7 @@ class Machine:
             drives=drives,
             network=Network.from_dict(d.get("network")),
             usb_tablet=bool(d.get("usb_tablet", True)),
+            builtin_audio=bool(d.get("builtin_audio", True)),
             usb_audio=bool(d.get("usb_audio", False)),
             usb_host_devices=usb_host_devices_from(d.get("usb_host_devices")),
             share=Share.from_dict(d.get("share")),

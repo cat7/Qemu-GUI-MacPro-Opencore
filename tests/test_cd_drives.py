@@ -21,7 +21,7 @@ NAME = "drive:HL-DT-ST DVDRAM GP57EB40"
 
 def machine(*drives) -> Machine:
     """Positions in order: SATA ports 1 to 5."""
-    m = Machine(name="C", display="cocoa")
+    m = Machine(name="C", display="cocoa", builtin_audio=False)
     m.drives = list(drives) + [None] * (5 - len(drives))
     return m
 

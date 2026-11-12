@@ -244,10 +244,13 @@ class UsbTab(EditorCase):
         ed = self._editor(Machine(name="t"))
         self.assertTrue(ed.usb_tablet_var.get())
         self.assertFalse(ed.usb_audio_var.get())
+        self.assertTrue(ed.builtin_audio_var.get())
         ed.usb_tablet_var.set(False)
         ed.usb_audio_var.set(True)
+        ed.builtin_audio_var.set(False)
         got = ed.collect()
-        self.assertEqual((got.usb_tablet, got.usb_audio), (False, True))
+        self.assertEqual((got.usb_tablet, got.usb_audio, got.builtin_audio),
+                         (False, True, False))
 
 
 @unittest.skipUnless(_tk_available(), "no display")

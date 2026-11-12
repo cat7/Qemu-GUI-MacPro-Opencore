@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import fatimg
 from . import paths
+from . import x86_command
 from . import x86_model as model
 from .x86_model import Machine
 
@@ -34,6 +35,18 @@ RTC_PATCH = dict(Base="\\_SB.PCI0.SF8.RTC", BaseSkip=0, Comment="RTC: 2 ports (o
                  Count=1, Enabled=True, Find=bytes.fromhex("4701700070000108"), Limit=0,
                  Mask=b"", OemTableId=bytes(8), Replace=bytes.fromhex("4701700070000102"),
                  ReplaceMask=b"", Skip=0, TableLength=0, TableSignature=b"DSDT")
+
+# SD8_ of the q35 DSDT is the HDEF the Mac OS X audio driver matches
+HDEF_PATCH = dict(Base="", BaseSkip=0, Comment="SD8 to HDEF", Count=0, Enabled=True,
+                  Find=b"SD8_", Limit=0, Mask=b"", OemTableId=bytes(8), Replace=b"HDEF",
+                  ReplaceMask=b"", Skip=0, TableLength=0, TableSignature=b"DSDT")
+HDA_PATH = "PciRoot(0x0)/Pci(0x1b,0x0)"
+HDA_PROPERTIES = {
+    "layout-id": bytes.fromhex("0c000000"),
+    "PinConfigurations": bytes.fromhex(
+        "f000004050410101f0000040f0000040407021011031810130011390f0000040f0000040"
+        "f000004060e1450120e1c501"),
+}
 
 
 class EspError(OSError):
@@ -103,13 +116,19 @@ def _section(parent: dict, key: str) -> dict:
     return parent.setdefault(key, {})
 
 
+def builtin_audio_in_effect(m: Machine) -> bool:
+    return x86_command.builtin_audio_added(m, paths.split_extra_args(m.extra_args))
+
+
 def make_config(m: Machine, sample: dict, kexts: list[Path]) -> dict:
     """The OpenCore config for *m*, from a loaded Sample.plist."""
     p = {k: v for k, v in sample.items() if not k.startswith("#")}
     arch = m.kernel_arch
 
     acpi = _section(p, "ACPI")
-    acpi.update(Add=[], Delete=[], Patch=[dict(RTC_PATCH)])
+    audio = builtin_audio_in_effect(m)
+    acpi.update(Add=[], Delete=[],
+                Patch=[dict(RTC_PATCH)] + ([dict(HDEF_PATCH)] if audio else []))
 
     kernel = _section(p, "Kernel")
     kernel["Add"] = [dict(Arch="Any", BundlePath=k.name, Comment=k.stem, Enabled=True,
@@ -130,8 +149,10 @@ def make_config(m: Machine, sample: dict, kexts: list[Path]) -> dict:
         ClearTaskSwitchBit=True)
 
     props = _section(p, "DeviceProperties")
-    props.update(Add={GPU_PATH: x1900_properties()} if m.gpu == model.GPU_X1900 else {},
-                 Delete={})
+    add = {GPU_PATH: x1900_properties()} if m.gpu == model.GPU_X1900 else {}
+    if audio:
+        add[HDA_PATH] = dict(HDA_PROPERTIES)
+    props.update(Add=add, Delete={})
 
     picker = bool(m.show_picker)
     misc = _section(p, "Misc")
