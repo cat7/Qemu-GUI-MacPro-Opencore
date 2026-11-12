@@ -80,7 +80,8 @@ def start_in_terminal(m: Machine, machine_dir: Path,
     folder stays up until the next start or quit."""
     machine_dir = Path(machine_dir)
     machine_dir.mkdir(parents=True, exist_ok=True)
-    launcher, _argv = command.write_launcher(m, qemu_dir(), str(machine_dir), key_file=key_file)
+    launcher, _argv = command.write_launcher(m, qemu_dir(), str(machine_dir), key_file=key_file,
+                                             late=usb_late(m))
     share_server = share.start_share(m) if m.share.ftp_on else None
     try:
         subprocess.Popen(["open", "-a", "Terminal", str(launcher)], cwd=str(machine_dir))
@@ -450,7 +451,7 @@ class MainWindow(tk.Tk):
         try:
             owned, _note = usb_owned(m)
             command.write_launcher(m, qemu_dir(), str(self.library.folder(m.name)),
-                                   paths.HOST_PLATFORM, owned, self.key_file())
+                                   paths.HOST_PLATFORM, owned, self.key_file(), usb_late(m))
         except OSError as e:
             messagebox.showerror(APP_TITLE, f"The start-up file could not be written.\n\n{e}")
 

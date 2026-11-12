@@ -378,5 +378,36 @@ class EditorTab(unittest.TestCase):
         self.assertEqual(ed.collect().usb_host_devices, m.usb_host_devices)
 
 
+
+class EveryWriterChecksForAnAudioCd(unittest.TestCase):
+    """Each place the start-up file is written passes the audio CD ids on."""
+
+    def test_writers(self):
+        import inspect
+        import re
+        from qemugui import x86_ui_main as ui
+        src = inspect.getsource(ui)
+        calls = re.findall(r"command\.(?:write_launcher|launcher_text)\((.*?)\)\n", src, re.S)
+        self.assertGreaterEqual(len(calls), 4)
+        for c in calls:
+            self.assertIn("usb_late(m)", c, c)
+
+    def test_terminal_start_passes_it(self):
+        from unittest import mock
+        from qemugui import x86_ui_main as ui
+        m = Machine(name="T", usb_host_devices=[UsbHostDevice("0e8d:1887", "d", "high")])
+        seen = {}
+
+        def fake(m_, q, d, *a, **kw):
+            seen.update(kw)
+            return Path(d) / "run.command", []
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(ui.command, "write_launcher", fake), \
+                mock.patch.object(ui, "usb_late", lambda m_: {"0e8d:1887"}), \
+                mock.patch.object(ui.subprocess, "Popen"):
+            ui.start_in_terminal(m, Path(td))
+        self.assertEqual(seen.get("late"), {"0e8d:1887"})
+
+
 if __name__ == "__main__":
     unittest.main()
