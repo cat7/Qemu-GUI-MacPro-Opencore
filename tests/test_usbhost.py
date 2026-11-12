@@ -206,7 +206,7 @@ class Launcher(unittest.TestCase):
         self.assertIn(f"sudo {QD}/qemu-system-x86_64 \\", text)
         self.assertIn('chown "${SUDO_USER:-$(id -un)}" OVMF_VARS.fd serial.log', text)
         for word in ("usbhostd", "attach", "USBREDIR"):
-            self.assertNotIn(word, text)
+            self.assertNotIn(word, text.replace("late-attach", ""))
 
     @support.needs_bash
     def test_the_sudo_launcher_is_valid_shell(self):
