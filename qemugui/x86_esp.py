@@ -3,8 +3,8 @@ record and the OpenCore release in the install folder, and the FAT image
 of it that QEMU attaches as SATA port 0.
 
 No Tk in here. ``build_esp`` writes a folder, ``write_esp`` also the image.
-The config is the release's Sample.plist with the settings Mac OS X 10.5
-(32-bit kernel) needs under q35 and OVMF.
+The config is the release's Sample.plist with the settings Mac OS X needs
+under q35 and OVMF; the kernel architecture follows the system chosen.
 """
 
 from __future__ import annotations
@@ -144,7 +144,7 @@ def make_config(m: Machine, sample: dict, kexts: list[Path], chime: bool = False
                           PlistPath="Contents/Info.plist") for k in kexts]
     kernel.update(Block=[], Patch=[], Force=[])
     scheme = _section(kernel, "Scheme")
-    scheme.update(KernelArch=arch, KernelCache="Mkext")
+    scheme.update(KernelArch=arch, KernelCache=m.kernel_cache)
     _section(kernel, "Quirks").update(ProvideCurrentCpuInfo=True, DisableLinkeditJettison=True)
     _section(kernel, "Emulate").update(DummyPowerManagement=True)
 

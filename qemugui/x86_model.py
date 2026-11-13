@@ -54,10 +54,14 @@ RTC_BASE_CHOICES = ("", "localtime")
 
 MAC_MODELS = ("MacPro1,1", "MacPro2,1", "MacPro3,1")
 MAC_MODEL_DEFAULT = "MacPro2,1"
-OS_VERSIONS = ("10.5",)
+OS_VERSIONS = ("10.5", "10.7", "10.8")
 OS_DEFAULT = "10.5"
 # the OpenCore Kernel->Scheme->KernelArch of each system
-OS_KERNEL_ARCH = {"10.5": "i386"}
+OS_KERNEL_ARCH = {"10.5": "i386", "10.7": "i386", "10.8": "x86_64"}
+# the OpenCore Kernel->Scheme->KernelCache of each system
+OS_KERNEL_CACHE = {"10.5": "Mkext", "10.7": "Mkext", "10.8": "Auto"}
+# 10.8 has a 64-bit kernel only and runs on no earlier Mac Pro
+OS_MAC_MODELS = {"10.8": ("MacPro3,1",)}
 
 # SATA ports 1 to 5; port 0 is the generated OpenCore boot disk
 DRIVE_SLOTS = tuple(f"SATA port {n}" for n in range(1, 6))
@@ -504,6 +508,10 @@ class Machine:
     def kernel_arch(self) -> str:
         return OS_KERNEL_ARCH.get(self.os, "i386")
 
+    @property
+    def kernel_cache(self) -> str:
+        return OS_KERNEL_CACHE.get(self.os, "Mkext")
+
 
 def new_machine(name: str) -> Machine:
     """A fresh record with the defaults and its own uuid. No file field is
@@ -547,6 +555,9 @@ def validate(m: Machine, qemu_dir: str | None = None, platform: str = paths.HOST
         errors.append(f"'{m.mac_model}' is not a Mac model this machine can be.")
     if m.os not in OS_VERSIONS:
         errors.append(f"'{m.os}' is not a Mac OS X version this machine can run.")
+    elif m.mac_model in MAC_MODELS and m.mac_model not in OS_MAC_MODELS.get(m.os, MAC_MODELS):
+        errors.append(f"Mac OS X {m.os} needs the Mac model "
+                      + " or ".join(OS_MAC_MODELS[m.os]) + ".")
     if m.ram_mb not in RAM_CHOICES:
         errors.append("Memory has to be " + ", ".join(str(x) for x in RAM_CHOICES) + " MB.")
     if m.smp not in SMP_CHOICES:

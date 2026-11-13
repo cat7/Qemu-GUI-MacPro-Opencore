@@ -611,7 +611,21 @@ class Record(unittest.TestCase):
         self.assertNotIn("osk", d)
 
     def test_the_os_selects_the_kernel_arch(self):
-        self.assertEqual(model.new_machine("t").kernel_arch, "i386")
+        m = model.new_machine("t")
+        self.assertEqual((m.kernel_arch, m.kernel_cache), ("i386", "Mkext"))
+        m.os = "10.7"
+        self.assertEqual(m.kernel_arch, "i386")
+        m.os = "10.8"
+        self.assertEqual((m.kernel_arch, m.kernel_cache), ("x86_64", "Auto"))
+
+    def test_mountain_lion_needs_the_2008_mac_pro(self):
+        m = model.new_machine("t")
+        m.os = "10.8"
+        errors, _ = model.validate(m, None, "darwin", check_files=False)
+        self.assertTrue(any("10.8" in e for e in errors))
+        m.mac_model = "MacPro3,1"
+        errors, _ = model.validate(m, None, "darwin", check_files=False)
+        self.assertFalse(any("10.8" in e for e in errors))
 
 
 class Validation(unittest.TestCase):
