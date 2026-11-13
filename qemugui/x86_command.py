@@ -111,12 +111,18 @@ def drive_tokens(m: Machine, machine_dir: str, platform: str) -> list[str]:
 
 
 def gpu_tokens(m: Machine, qemu_dir: str, platform: str) -> list[str]:
-    if m.gpu != model.GPU_X1900:
+    if m.gpu not in model.GPU_ROMS:
         return ["-vga", "std"]
-    rom = _path(paths.R580_ROM_NAME, qemu_dir, platform)
+    rom = _path(model.GPU_ROMS[m.gpu], qemu_dir, platform)
+    if m.gpu == model.GPU_HD5770:
+        # the monitor's preferred size; the firmware starts at 1024x768
+        w, h = m.resolution.split("x")
+        card = f"ati-radeon-hd5770,bus=br1,addr=0x0,romfile={qopt(rom)},xres={w},yres={h}"
+    else:
+        card = f"ati-radeon-x1900,bus=br1,romfile={qopt(rom)}"
     return ["-vga", "none",
             "-device", "pci-bridge,id=br1,bus=pcie.0,addr=0x1,chassis_nr=1,shpc=off",
-            "-device", f"ati-radeon-x1900,bus=br1,romfile={qopt(rom)}"]
+            "-device", card]
 
 
 def build_argv(m: Machine, qemu_dir: str, machine_dir: str,

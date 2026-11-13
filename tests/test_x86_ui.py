@@ -152,7 +152,7 @@ class DisplayAndBoot(EditorCase):
         self.assertEqual(ed.collect().gpu, "std")
         self.assertEqual(str(ed.resolution_cb.cget("state")), "readonly")
         self.assertEqual(list(ed.gpu_cb.cget("values")),
-                         ["Standard VGA", "ATI Radeon X1900 XT"])
+                         ["Standard VGA", "ATI Radeon X1900 XT", "ATI Radeon HD 5770"])
         ed.gpu_var.set("ATI Radeon X1900 XT")
         ed._gpu_changed()
         got = ed.collect()

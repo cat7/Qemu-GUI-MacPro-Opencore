@@ -124,11 +124,17 @@ RESOLUTION_DEFAULT = "1440x900"
 
 GPU_STD = "std"
 GPU_X1900 = "x1900"
+GPU_HD5770 = "hd5770"
 GPU_LABELS = {GPU_STD: "Standard VGA",
-              GPU_X1900: "ATI Radeon X1900 XT"}
+              GPU_X1900: "ATI Radeon X1900 XT",
+              GPU_HD5770: "ATI Radeon HD 5770"}
 GPUS = tuple(GPU_LABELS)
+# the firmware driver's file of each card
+GPU_ROMS = {GPU_X1900: paths.R580_ROM_NAME, GPU_HD5770: paths.HD5770_ROM_NAME}
+# the systems with a driver for each card
+GPU_OS = {GPU_X1900: ("10.5", "10.6", "10.7"), GPU_HD5770: ("10.6", "10.7", "10.8")}
 GPU_DEFAULT = GPU_STD
-# the only mode the X1900 firmware driver offers
+# the only mode the cards' firmware drivers offer
 GPU_X1900_RESOLUTION = "1024x768"
 
 
@@ -542,10 +548,10 @@ def start_blockers(m: Machine, key_file: str | Path | None = None,
     """What stops a start: the SMC key file, the X1900 ROM file."""
     why = smc_key_problem(key_file if key_file is not None else paths.default_smc_key_file())
     out = [why] if why else []
-    if m.gpu == GPU_X1900:
+    if m.gpu in GPU_ROMS:
         rom = Path(qemu_dir) if qemu_dir else paths.install_dir()
-        if not (rom / paths.R580_ROM_NAME).is_file():
-            out.append(f"The graphics card needs the file {paths.R580_ROM_NAME} in the "
+        if not (rom / GPU_ROMS[m.gpu]).is_file():
+            out.append(f"The graphics card needs the file {GPU_ROMS[m.gpu]} in the "
                        "folder with the program, and it is not there.")
     return out
 
@@ -582,6 +588,9 @@ def validate(m: Machine, qemu_dir: str | None = None, platform: str = paths.HOST
         warnings.append(f"{m.accel} does not work on this computer.")
     if m.gpu not in GPUS:
         errors.append(f"'{m.gpu}' is not a graphics card this machine can have.")
+    elif m.os in OS_VERSIONS and m.os not in GPU_OS.get(m.gpu, OS_VERSIONS):
+        warnings.append(f"Mac OS X {os_label(m.os)} has no driver for the {gpu_label(m.gpu)}: "
+                        "the screen stays at 1024x768 without acceleration.")
     if m.resolution not in RESOLUTIONS:
         errors.append("Screen size at boot has to be " + ", ".join(RESOLUTIONS) + ".")
     if m.display == "cocoa" and platform != "darwin":

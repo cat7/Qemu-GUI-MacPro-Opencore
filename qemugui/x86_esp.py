@@ -82,6 +82,25 @@ def x1900_properties() -> dict:
     return props
 
 
+HD5770_FRAMEBUFFER = "ATY,Langur"
+
+
+def hd5770_properties() -> dict:
+    fb = HD5770_FRAMEBUFFER
+    props = {
+        "name": fb + "Parent",
+        "device_type": fb + "Parent",
+        "model": "ATI Radeon HD 5770",
+        "VRAM,totalsize": (1 << 30).to_bytes(4, "little"),
+    }
+    for i in (0, 1, 2):
+        props.update({f"@{i},name": fb, f"@{i},compatible": fb, f"@{i},device_type": "display"})
+    return props
+
+
+GPU_PROPERTIES = {model.GPU_X1900: x1900_properties, model.GPU_HD5770: hd5770_properties}
+
+
 def rom_bytes(m: Machine) -> bytes:
     mac = m.network.mac if model.MAC_RE.match(m.network.mac) else model.DEFAULT_MAC
     return bytes.fromhex(mac.replace(":", ""))
@@ -157,7 +176,7 @@ def make_config(m: Machine, sample: dict, kexts: list[Path], chime: bool = False
         ClearTaskSwitchBit=True)
 
     props = _section(p, "DeviceProperties")
-    add = {GPU_PATH: x1900_properties()} if m.gpu == model.GPU_X1900 else {}
+    add = {GPU_PATH: GPU_PROPERTIES[m.gpu]()} if m.gpu in GPU_PROPERTIES else {}
     if audio:
         add[HDA_PATH] = dict(HDA_PROPERTIES)
     props.update(Add=add, Delete={})
@@ -202,7 +221,7 @@ def make_config(m: Machine, sample: dict, kexts: list[Path], chime: bool = False
                        + ((paths.OPENCORE_AUDIO_DRIVER,) if chime else ())]
     _section(uefi, "Audio").update(CHIME_AUDIO if chime else dict(AudioSupport=False))
     _section(uefi, "Quirks")["RequestBootVarRouting"] = True
-    resolution = model.GPU_X1900_RESOLUTION if m.gpu == model.GPU_X1900 else m.resolution
+    resolution = model.GPU_X1900_RESOLUTION if m.gpu in model.GPU_ROMS else m.resolution
     _section(uefi, "Output").update(ProvideConsoleGop=True, Resolution=resolution,
                                     TextRenderer="BuiltinText", UgaPassThrough=True,
                                     InitialMode="Text")

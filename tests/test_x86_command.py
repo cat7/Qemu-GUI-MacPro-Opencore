@@ -225,6 +225,15 @@ class GoldenCommandLines(unittest.TestCase):
         self.assertIn(rf"ati-radeon-x1900,bus=br1,romfile={WQD}\ati-r580-gop.rom", w)
         self.assertEqual(option(argv_of(plain(gpu="std")), "-vga"), ["std"])
 
+    def test_the_hd5770_argv_carries_the_screen_size(self):
+        a = argv_of(plain(gpu="hd5770", resolution="1680x1050"))
+        i = a.index("-vga")
+        self.assertEqual(a[i:i + 6], [
+            "-vga", "none",
+            "-device", "pci-bridge,id=br1,bus=pcie.0,addr=0x1,chassis_nr=1,shpc=off",
+            "-device", f"ati-radeon-hd5770,bus=br1,addr=0x0,romfile={QD}/ati-hd5770-gop.rom,"
+                       "xres=1680,yres=1050"])
+
     def test_a_fixture_record_end_to_end(self):
         m = Machine.load(FIXTURES / "x86-leopard.json")
         argv = argv_of(m)
@@ -527,6 +536,25 @@ class SmcKeyFile(unittest.TestCase):
         self.assertEqual(model.start_blockers(plain(), self.p)[0][:12], "The SMC key ")
         self.p.write_text("x" * 64)
         self.assertEqual(model.start_blockers(plain(), self.p), [])
+
+    def test_the_hd5770_needs_its_rom_file(self):
+        self.p.write_text("x" * 64)
+        m = plain(gpu="hd5770")
+        got = model.start_blockers(m, self.p, self.td.name)
+        self.assertEqual(len(got), 1)
+        self.assertIn("ati-hd5770-gop.rom", got[0])
+        (Path(self.td.name) / "ati-hd5770-gop.rom").write_bytes(b"rom")
+        self.assertEqual(model.start_blockers(m, self.p, self.td.name), [])
+
+    def test_a_card_without_a_driver_is_warned_about(self):
+        def warned(**kw):
+            _, w = model.validate(plain(**kw), None, "darwin", check_files=False)
+            return any("no driver" in x for x in w)
+        self.assertTrue(warned(gpu="x1900", os="10.8", mac_model="MacPro3,1"))
+        self.assertTrue(warned(gpu="hd5770", os="10.5"))
+        self.assertFalse(warned(gpu="hd5770", os="10.8", mac_model="MacPro3,1"))
+        self.assertFalse(warned(gpu="x1900", os="10.5"))
+        self.assertFalse(warned(gpu="std", os="10.8", mac_model="MacPro3,1"))
 
     def test_the_x1900_needs_its_rom_file(self):
         self.p.write_text("x" * 64)

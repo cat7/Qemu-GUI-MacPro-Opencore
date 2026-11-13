@@ -152,6 +152,15 @@ class Settings(Case):
         d = self.build(machine(gpu="std"))["DeviceProperties"]
         self.assertEqual((d["Add"], d["Delete"]), ({}, {}))
 
+    def test_the_hd5770_device_properties(self):
+        cfg = self.build(machine(gpu="hd5770", resolution="1920x1200"))
+        p = cfg["DeviceProperties"]["Add"]["PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)"]
+        self.assertEqual(p["@2,name"], "ATY,Langur")
+        self.assertEqual(p["name"], "ATY,LangurParent")
+        self.assertEqual(p["model"], "ATI Radeon HD 5770")
+        self.assertEqual(p["VRAM,totalsize"], bytes.fromhex("00000040"))
+        self.assertEqual(cfg["UEFI"]["Output"]["Resolution"], "1024x768")
+
     def test_the_x1900_device_properties(self):
         cfg = self.build(machine(gpu="x1900"))
         add = cfg["DeviceProperties"]["Add"]
