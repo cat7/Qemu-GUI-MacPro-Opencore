@@ -613,10 +613,16 @@ class Record(unittest.TestCase):
     def test_the_os_selects_the_kernel_arch(self):
         m = model.new_machine("t")
         self.assertEqual((m.kernel_arch, m.kernel_cache), ("i386", "Mkext"))
-        m.os = "10.7"
-        self.assertEqual(m.kernel_arch, "i386")
+        for v in ("10.6", "10.7"):
+            m.os = v
+            self.assertEqual((m.kernel_arch, m.kernel_cache), ("i386", "Mkext"))
         m.os = "10.8"
         self.assertEqual((m.kernel_arch, m.kernel_cache), ("x86_64", "Auto"))
+
+    def test_the_os_label_round_trips(self):
+        self.assertEqual(model.OS_LABELS[1], "10.6 Snow Leopard")
+        for v in model.OS_VERSIONS:
+            self.assertEqual(model.os_by_label(model.os_label(v)), v)
 
     def test_mountain_lion_needs_the_2008_mac_pro(self):
         m = model.new_machine("t")

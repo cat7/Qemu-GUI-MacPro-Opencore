@@ -221,8 +221,8 @@ class MachineEditor(tk.Toplevel):
         r += 1
         ttk.Label(f, text="Mac OS X:").grid(row=r, column=0, sticky="w", pady=4)
         self.os_var = tk.StringVar()
-        ttk.Combobox(f, textvariable=self.os_var, values=list(model.OS_VERSIONS),
-                     state="readonly", width=14).grid(row=r, column=1, sticky="w", pady=4)
+        ttk.Combobox(f, textvariable=self.os_var, values=list(model.OS_LABELS),
+                     state="readonly", width=20).grid(row=r, column=1, sticky="w", pady=4)
         r += 1
         ttk.Label(f, text="Processors:").grid(row=r, column=0, sticky="w", pady=4)
         self.smp_var = tk.StringVar()
@@ -699,7 +699,7 @@ class MachineEditor(tk.Toplevel):
     def load(self, m: Machine):
         self.name_var.set(m.name)
         self.model_var.set(m.mac_model)
-        self.os_var.set(m.os)
+        self.os_var.set(model.os_label(m.os))
         self.smp_var.set(str(m.smp))
         self.ram_var.set(str(m.ram_mb))
         self.accel_cb.config(values=model.accel_labels_for_host(paths.HOST_PLATFORM, m.accel))
@@ -747,7 +747,7 @@ class MachineEditor(tk.Toplevel):
         m = self.machine.copy()
         m.name = self.name_var.get().strip()
         m.mac_model = self.model_var.get()
-        m.os = self.os_var.get()
+        m.os = model.os_by_label(self.os_var.get())
         try:
             m.smp = int(self.smp_var.get().strip())
         except ValueError:

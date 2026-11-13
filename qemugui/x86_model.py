@@ -54,12 +54,26 @@ RTC_BASE_CHOICES = ("", "localtime")
 
 MAC_MODELS = ("MacPro1,1", "MacPro2,1", "MacPro3,1")
 MAC_MODEL_DEFAULT = "MacPro2,1"
-OS_VERSIONS = ("10.5", "10.7", "10.8")
+OS_VERSIONS = ("10.5", "10.6", "10.7", "10.8")
 OS_DEFAULT = "10.5"
+OS_NAMES = {"10.5": "Leopard", "10.6": "Snow Leopard", "10.7": "Lion",
+            "10.8": "Mountain Lion"}
 # the OpenCore Kernel->Scheme->KernelArch of each system
-OS_KERNEL_ARCH = {"10.5": "i386", "10.7": "i386", "10.8": "x86_64"}
+OS_KERNEL_ARCH = {"10.5": "i386", "10.6": "i386", "10.7": "i386", "10.8": "x86_64"}
 # the OpenCore Kernel->Scheme->KernelCache of each system
-OS_KERNEL_CACHE = {"10.5": "Mkext", "10.7": "Mkext", "10.8": "Auto"}
+OS_KERNEL_CACHE = {"10.5": "Mkext", "10.6": "Mkext", "10.7": "Mkext", "10.8": "Auto"}
+
+
+def os_label(version: str) -> str:
+    name = OS_NAMES.get(version)
+    return f"{version} {name}" if name else version
+
+
+def os_by_label(label: str) -> str:
+    return (label or "").split(" ", 1)[0]
+
+
+OS_LABELS = tuple(os_label(v) for v in OS_VERSIONS)
 # 10.8 has a 64-bit kernel only and runs on no earlier Mac Pro
 OS_MAC_MODELS = {"10.8": ("MacPro3,1",)}
 
