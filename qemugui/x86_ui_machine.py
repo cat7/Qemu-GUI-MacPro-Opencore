@@ -216,8 +216,10 @@ class MachineEditor(tk.Toplevel):
         r += 1
         ttk.Label(f, text="Mac model:").grid(row=r, column=0, sticky="w", pady=4)
         self.model_var = tk.StringVar()
-        ttk.Combobox(f, textvariable=self.model_var, values=list(model.MAC_MODELS),
-                     state="readonly", width=14).grid(row=r, column=1, sticky="w", pady=4)
+        model_cb = ttk.Combobox(f, textvariable=self.model_var, values=list(model.MAC_MODELS),
+                                state="readonly", width=14)
+        model_cb.grid(row=r, column=1, sticky="w", pady=4)
+        model_cb.bind("<<ComboboxSelected>>", lambda _e: self._ram_values())
         r += 1
         ttk.Label(f, text="Mac OS X:").grid(row=r, column=0, sticky="w", pady=4)
         self.os_var = tk.StringVar()
@@ -231,8 +233,10 @@ class MachineEditor(tk.Toplevel):
         r += 1
         ttk.Label(f, text="Memory (MB):").grid(row=r, column=0, sticky="w", pady=4)
         self.ram_var = tk.StringVar()
-        ttk.Combobox(f, textvariable=self.ram_var, values=[str(x) for x in model.RAM_CHOICES],
-                     state="readonly", width=14).grid(row=r, column=1, sticky="w", pady=4)
+        self.ram_cb = ttk.Combobox(f, textvariable=self.ram_var,
+                                   values=[str(x) for x in model.RAM_CHOICES],
+                                   state="readonly", width=14)
+        self.ram_cb.grid(row=r, column=1, sticky="w", pady=4)
         r += 1
         ttk.Label(f, text="Acceleration:").grid(row=r, column=0, sticky="w", pady=4)
         self.accel_var = tk.StringVar()
@@ -692,6 +696,14 @@ class MachineEditor(tk.Toplevel):
         if callable(refresh):
             refresh()
 
+    def _ram_values(self):
+        """Memory sizes for the chosen model; the current one stays."""
+        got = [str(x) for x in model.ram_choices(self.model_var.get())]
+        cur = self.ram_var.get()
+        if cur and cur not in got:
+            got.append(cur)
+        self.ram_cb.config(values=got)
+
     def _build_advanced(self):
         f = self._tab("Advanced")
         f.columnconfigure(1, weight=1)
@@ -715,6 +727,7 @@ class MachineEditor(tk.Toplevel):
         self.os_var.set(model.os_label(m.os))
         self.smp_var.set(str(m.smp))
         self.ram_var.set(str(m.ram_mb))
+        self._ram_values()
         self.accel_cb.config(values=model.accel_labels_for_host(paths.HOST_PLATFORM, m.accel))
         self.accel_var.set(model.accel_label(m.accel))
         self.display_var.set(m.display)

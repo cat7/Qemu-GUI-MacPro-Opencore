@@ -80,7 +80,7 @@ class MachineTab(EditorCase):
         self.assertEqual(list(ed.model_var and ed.nb.winfo_children()[0].winfo_children()[3]
                               .cget("values")), list(model.MAC_MODELS))
         self.assertEqual(model.SMP_CHOICES, (1, 2, 4, 8))
-        self.assertEqual(model.RAM_CHOICES, (1024, 2048, 3072, 4096))
+        self.assertEqual(model.RAM_CHOICES[:4], (1024, 2048, 3072, 4096))
 
     def test_the_uuid_survives_editing(self):
         m = model.new_machine("t")

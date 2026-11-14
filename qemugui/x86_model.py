@@ -117,7 +117,18 @@ def smp_option(n: int) -> str:
     return f"{n},sockets=2,cores={n // 2},threads=1"
 
 SMP_DEFAULT = 1
-RAM_CHOICES = (1024, 2048, 3072, 4096)
+RAM_SIZES = (1024, 2048, 3072, 4096, 6144, 8192, 12288, 16384, 24576, 32768)
+# the most memory Apple lists for each model
+MAC_MODEL_MAX_RAM = {"MacPro1,1": 16384, "MacPro2,1": 16384, "MacPro3,1": 32768}
+RAM_CHOICES = RAM_SIZES
+
+
+def ram_max_mb(mac_model: str) -> int:
+    return MAC_MODEL_MAX_RAM.get(mac_model, max(RAM_SIZES))
+
+
+def ram_choices(mac_model: str) -> tuple[int, ...]:
+    return tuple(x for x in RAM_SIZES if x <= ram_max_mb(mac_model))
 RAM_DEFAULT = 2048
 
 ACCEL_DEFAULT = "tcg"
@@ -583,8 +594,10 @@ def validate(m: Machine, qemu_dir: str | None = None, platform: str = paths.HOST
     elif m.mac_model in MAC_MODELS and m.mac_model not in OS_MAC_MODELS.get(m.os, MAC_MODELS):
         errors.append(f"Mac OS X {m.os} needs the Mac model "
                       + " or ".join(OS_MAC_MODELS[m.os]) + ".")
-    if m.ram_mb not in RAM_CHOICES:
-        errors.append("Memory has to be " + ", ".join(str(x) for x in RAM_CHOICES) + " MB.")
+    if m.ram_mb not in RAM_SIZES:
+        errors.append("Memory has to be " + ", ".join(str(x) for x in RAM_SIZES) + " MB.")
+    elif m.ram_mb > ram_max_mb(m.mac_model):
+        errors.append(f"A {m.mac_model} takes at most {ram_max_mb(m.mac_model)} MB.")
     if m.smp not in SMP_CHOICES:
         errors.append("Processors has to be " + ", ".join(str(x) for x in SMP_CHOICES) + ".")
     elif m.smp > MAC_MODEL_MAX_SMP.get(m.mac_model, max(SMP_CHOICES)):

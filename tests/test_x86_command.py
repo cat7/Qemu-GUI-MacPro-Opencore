@@ -675,6 +675,17 @@ class Record(unittest.TestCase):
         self.assertFalse(errs(mac_model="MacPro1,1", smp=4))
         self.assertFalse(errs(mac_model="MacPro2,1", smp=8))
 
+    def test_memory_goes_up_to_the_real_model(self):
+        self.assertEqual(model.ram_choices("MacPro1,1")[-1], 16384)
+        self.assertEqual(model.ram_choices("MacPro2,1")[-1], 16384)
+        self.assertEqual(model.ram_choices("MacPro3,1")[-1], 32768)
+        e, _ = model.validate(plain(mac_model="MacPro2,1", ram_mb=32768), None,
+                              "darwin", check_files=False)
+        self.assertTrue(any("at most" in x for x in e))
+        e, _ = model.validate(plain(mac_model="MacPro3,1", ram_mb=32768), None,
+                              "darwin", check_files=False)
+        self.assertFalse(any("Memory" in x or "at most" in x for x in e))
+
     def test_leopard_on_the_2008_mac_pro_is_noted(self):
         def noted(**kw):
             _, w = model.validate(plain(**kw), None, "darwin", check_files=False)
