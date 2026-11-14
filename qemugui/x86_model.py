@@ -76,6 +76,8 @@ def os_by_label(label: str) -> str:
 OS_LABELS = tuple(os_label(v) for v in OS_VERSIONS)
 # 10.8 has a 64-bit kernel only and runs on no earlier Mac Pro
 OS_MAC_MODELS = {"10.8": ("MacPro3,1",)}
+# the most processors each model shipped with
+MAC_MODEL_MAX_SMP = {"MacPro1,1": 4, "MacPro2,1": 8, "MacPro3,1": 8}
 
 # SATA ports 1 to 5; port 0 is the generated OpenCore boot disk
 DRIVE_SLOTS = tuple(f"SATA port {n}" for n in range(1, 6))
@@ -585,6 +587,12 @@ def validate(m: Machine, qemu_dir: str | None = None, platform: str = paths.HOST
         errors.append("Memory has to be " + ", ".join(str(x) for x in RAM_CHOICES) + " MB.")
     if m.smp not in SMP_CHOICES:
         errors.append("Processors has to be " + ", ".join(str(x) for x in SMP_CHOICES) + ".")
+    elif m.smp > MAC_MODEL_MAX_SMP.get(m.mac_model, max(SMP_CHOICES)):
+        errors.append(f"A {m.mac_model} has at most "
+                      f"{MAC_MODEL_MAX_SMP[m.mac_model]} processors.")
+    if m.os == "10.5" and m.mac_model == "MacPro3,1":
+        warnings.append("A MacPro3,1 needs a Mac OS X 10.5.1 or later install disc; "
+                        "the original 10.5.0 disc is not meant for it.")
     if m.accel not in ("tcg", "hvf", "whpx"):
         errors.append(f"'{m.accel}' is not an acceleration setting.")
     elif m.accel not in accel_choices(platform):

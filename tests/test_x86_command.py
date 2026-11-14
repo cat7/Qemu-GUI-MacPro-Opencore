@@ -667,6 +667,21 @@ class Record(unittest.TestCase):
         errors, _ = model.validate(m, None, "darwin", check_files=False)
         self.assertFalse(any("10.8" in e for e in errors))
 
+    def test_the_2006_mac_pro_has_four_processors(self):
+        def errs(**kw):
+            e, _ = model.validate(plain(**kw), None, "darwin", check_files=False)
+            return any("at most" in x for x in e)
+        self.assertTrue(errs(mac_model="MacPro1,1", smp=8))
+        self.assertFalse(errs(mac_model="MacPro1,1", smp=4))
+        self.assertFalse(errs(mac_model="MacPro2,1", smp=8))
+
+    def test_leopard_on_the_2008_mac_pro_is_noted(self):
+        def noted(**kw):
+            _, w = model.validate(plain(**kw), None, "darwin", check_files=False)
+            return any("10.5.1" in x for x in w)
+        self.assertTrue(noted(os="10.5", mac_model="MacPro3,1"))
+        self.assertFalse(noted(os="10.5", mac_model="MacPro2,1"))
+
 
 class Validation(unittest.TestCase):
 
