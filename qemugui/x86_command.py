@@ -118,6 +118,8 @@ def gpu_tokens(m: Machine, qemu_dir: str, platform: str) -> list[str]:
         # the monitor's preferred size; the firmware starts at 1024x768
         w, h = m.resolution.split("x")
         card = f"ati-radeon-hd5770,bus=br1,addr=0x0,romfile={qopt(rom)},xres={w},yres={h}"
+        if m.gpu_accel:
+            card += ",accel=on"
     else:
         card = f"ati-radeon-x1900,bus=br1,romfile={qopt(rom)}"
     return ["-vga", "none",

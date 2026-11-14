@@ -271,6 +271,12 @@ class MachineEditor(tk.Toplevel):
         self.gpu_cb.grid(row=r, column=1, columnspan=2, sticky="w", pady=4)
         self.gpu_cb.bind("<<ComboboxSelected>>", self._gpu_changed)
         r += 1
+        self.gpu_accel_var = tk.BooleanVar(value=False)
+        self.gpu_accel_cb = ttk.Checkbutton(
+            f, text="Graphics acceleration (Quartz Extreme), drawn by this computer's "
+                    "graphics card", variable=self.gpu_accel_var)
+        self.gpu_accel_cb.grid(row=r, column=1, columnspan=2, sticky="w")
+        r += 1
         ttk.Label(f, text="Screen size at boot:").grid(row=r, column=0, sticky="w", pady=4)
         self.resolution_var = tk.StringVar()
         self.resolution_cb = ttk.Combobox(f, textvariable=self.resolution_var,
@@ -303,8 +309,15 @@ class MachineEditor(tk.Toplevel):
                                                        sticky="w", pady=(10, 0))
 
     def _gpu_changed(self, _e=None):
-        """The X1900 firmware driver offers one mode: the size is fixed to it."""
-        if model.gpu_by_label(self.gpu_var.get()) == model.GPU_X1900:
+        """The X1900 firmware driver offers one mode: the size is fixed to it.
+        Only the HD 5770 has the acceleration switch."""
+        gpu = model.gpu_by_label(self.gpu_var.get())
+        if gpu == model.GPU_HD5770:
+            self.gpu_accel_cb.config(state="normal")
+        else:
+            self.gpu_accel_var.set(False)
+            self.gpu_accel_cb.config(state="disabled")
+        if gpu == model.GPU_X1900:
             self.resolution_var.set(model.GPU_X1900_RESOLUTION)
             self.resolution_cb.config(state="disabled")
         else:
@@ -710,6 +723,7 @@ class MachineEditor(tk.Toplevel):
         self._vnc_changed()
         self.gpu_var.set(model.gpu_label(m.gpu))
         self.resolution_var.set(m.resolution)
+        self.gpu_accel_var.set(m.gpu_accel)
         self._gpu_changed()
         self.picker_var.set(m.show_picker)
         self.boot_args_var.set(m.boot_args)
@@ -760,6 +774,7 @@ class MachineEditor(tk.Toplevel):
         m.display = self.display_var.get()
         m.vnc = self.vnc_var.get().strip() if self.vnc_on.get() else ""
         m.gpu = model.gpu_by_label(self.gpu_var.get())
+        m.gpu_accel = self.gpu_accel_var.get() and m.gpu == model.GPU_HD5770
         m.resolution = self.resolution_var.get()
         m.show_picker = self.picker_var.get()
         m.boot_args = " ".join(self.boot_args_var.get().split())

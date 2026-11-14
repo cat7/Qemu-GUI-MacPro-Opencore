@@ -234,6 +234,12 @@ class GoldenCommandLines(unittest.TestCase):
             "-device", f"ati-radeon-hd5770,bus=br1,addr=0x0,romfile={QD}/ati-hd5770-gop.rom,"
                        "xres=1680,yres=1050"])
 
+    def test_the_hd5770_accelerator_is_a_card_property(self):
+        card = argv_of(plain(gpu="hd5770", gpu_accel=True))
+        self.assertTrue(card[card.index("-vga") + 5].endswith(",xres=1440,yres=900,accel=on"))
+        self.assertNotIn("accel=on", " ".join(argv_of(plain(gpu="hd5770"))))
+        self.assertNotIn("accel=on", " ".join(argv_of(plain(gpu="x1900", gpu_accel=True))))
+
     def test_a_fixture_record_end_to_end(self):
         m = Machine.load(FIXTURES / "x86-leopard.json")
         argv = argv_of(m)
