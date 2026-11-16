@@ -1,4 +1,4 @@
-"""The machine editor: Machine, Drives, Display & boot, Network, USB devices,
+"""The machine editor: Machine, Drives, Display, Sound, Network, USB devices,
 Shared folder, Advanced.
 
 * Nothing is ever filled in for you. Every field that names a file starts
@@ -9,7 +9,6 @@ Shared folder, Advanced.
 
 from __future__ import annotations
 
-import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
@@ -21,6 +20,7 @@ from . import x86_model as model
 from .x86_model import Machine, Drive, Network, Share, UsbHostDevice
 from .x86_ui_dialogs import (show_validation, refresh_native_style, CreateDiskDialog,
                             HostDriveDialog)
+from .x86_ui_fonts import heading_font
 
 KIND_LABELS = {"": "Empty", "disk": "Hard disk", "cdrom": "CD"}
 KIND_BY_LABEL = {v: k for k, v in KIND_LABELS.items()}
@@ -156,6 +156,7 @@ class MachineEditor(tk.Toplevel):
         self._build_machine()
         self._build_drives()
         self._build_display()
+        self._build_sound()
         self._build_network()
         self._build_usb()
         self._build_share()
@@ -201,14 +202,20 @@ class MachineEditor(tk.Toplevel):
         return self.library.folder(name) if name else self.library.root
 
     def _tab(self, title: str) -> ttk.Frame:
+        """A tab with its title as the heading in row 0."""
         f = ttk.Frame(self.nb, padding=8)
         self.nb.add(f, text=title)
+        self._heading(f, title, 0)
         return f
+
+    def _heading(self, master, text: str, row: int, top: int = 0, columnspan: int = 3):
+        ttk.Label(master, text=text, font=heading_font(self)).grid(
+            row=row, column=0, columnspan=columnspan, sticky="w", pady=(top, 4))
 
     def _build_machine(self):
         f = self._tab("Machine")
         f.columnconfigure(1, weight=1)
-        r = 0
+        r = 1
         ttk.Label(f, text="Name:").grid(row=r, column=0, sticky="w", pady=4)
         self.name_var = tk.StringVar()
         self.name_entry = ttk.Entry(f, textvariable=self.name_var, width=40)
@@ -245,12 +252,12 @@ class MachineEditor(tk.Toplevel):
         self.accel_cb.grid(row=r, column=1, sticky="w", pady=4)
 
     def _build_display(self):
-        f = self._tab("Display & boot")
+        f = self._tab("Display")
         f.columnconfigure(1, weight=1)
         self.display_var = tk.StringVar()
         displays = model.DISPLAYS.get("win32" if paths.is_windows(paths.HOST_PLATFORM)
                                       else paths.HOST_PLATFORM, ("sdl", "gtk"))
-        r = 0
+        r = 1
         ttk.Label(f, text="Display:").grid(row=r, column=0, sticky="w", pady=(0, 8))
         ttk.Combobox(f, textvariable=self.display_var, values=list(displays), state="readonly",
                      width=10).grid(row=r, column=1, sticky="w", pady=(0, 8))
@@ -275,52 +282,16 @@ class MachineEditor(tk.Toplevel):
         self.gpu_cb.grid(row=r, column=1, columnspan=2, sticky="w", pady=4)
         self.gpu_cb.bind("<<ComboboxSelected>>", self._gpu_changed)
         r += 1
-        self.gpu_accel_var = tk.BooleanVar(value=False)
-        self.gpu_accel_cb = ttk.Checkbutton(
-            f, text="Graphics acceleration (Quartz Extreme), drawn by this computer's "
-                    "graphics card", variable=self.gpu_accel_var)
-        self.gpu_accel_cb.grid(row=r, column=1, columnspan=2, sticky="w")
-        r += 1
         ttk.Label(f, text="Screen size at boot:").grid(row=r, column=0, sticky="w", pady=4)
         self.resolution_var = tk.StringVar()
         self.resolution_cb = ttk.Combobox(f, textvariable=self.resolution_var,
                                           values=list(model.RESOLUTIONS), state="readonly",
                                           width=12)
         self.resolution_cb.grid(row=r, column=1, sticky="w", pady=4)
-        r += 1
-        self.picker_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="Show the boot picker at start",
-                        variable=self.picker_var).grid(row=r, column=0, columnspan=3,
-                                                       sticky="w", pady=(6, 0))
-        r += 1
-        ttk.Label(f, text="Extra kernel arguments:").grid(row=r, column=0, sticky="w", pady=(6, 0))
-        self.boot_args_var = tk.StringVar()
-        ttk.Entry(f, textvariable=self.boot_args_var, width=40).grid(
-            row=r, column=1, sticky="ew", pady=(6, 0))
-        r += 1
-        ttk.Label(f, text="Added after keepsyms=1 debug=0x100 (debug=0x108 serial=3 with a "
-                          "serial log).",
-                  foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
-            row=r, column=0, columnspan=3, sticky="w")
-        r += 1
-        self.verbose_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="Verbose boot", variable=self.verbose_var).grid(
-            row=r, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        r += 1
-        self.serial_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="Write a serial log (serial.log in the machine folder)",
-                        variable=self.serial_var).grid(row=r, column=0, columnspan=3,
-                                                       sticky="w", pady=(10, 0))
 
     def _gpu_changed(self, _e=None):
-        """The X1900 firmware driver offers one mode: the size is fixed to it.
-        Only the HD 5770 has the acceleration switch."""
+        """The X1900 firmware driver offers one mode: the size is fixed to it."""
         gpu = model.gpu_by_label(self.gpu_var.get())
-        if gpu == model.GPU_HD5770:
-            self.gpu_accel_cb.config(state="normal")
-        else:
-            self.gpu_accel_var.set(False)
-            self.gpu_accel_cb.config(state="disabled")
         if gpu == model.GPU_X1900:
             self.resolution_var.set(model.GPU_X1900_RESOLUTION)
             self.resolution_cb.config(state="disabled")
@@ -339,24 +310,24 @@ class MachineEditor(tk.Toplevel):
         f = self._tab("Drives")
         f.columnconfigure(0, weight=1)
         rows = ttk.Frame(f)
-        rows.grid(row=0, column=0, sticky="ew")
+        rows.grid(row=1, column=0, sticky="ew")
         rows.columnconfigure(2, weight=1)
         for c, h in enumerate(("Position", "", "", "Format", "")):
             ttk.Label(rows, text=h, foreground=GREY).grid(row=0, column=c, sticky="w", padx=4)
         self.drive_rows = [DriveRow(rows, 1 + i, i, fallback=self.machine_folder)
                            for i in range(len(model.DRIVE_SLOTS))]
         ttk.Label(f, text="The OpenCore boot disk is made by this program and is not listed here.",
-                  foreground=GREY).grid(row=1, column=0, sticky="w", pady=(6, 0))
+                  foreground=GREY).grid(row=2, column=0, sticky="w", pady=(6, 0))
         ttk.Label(f, text="A .dmg or .cue image works as a CD. A .dmg as a hard disk is read "
                           "only: what the Mac writes to it is thrown away when the machine "
                           "quits. Host drive… gives a position a real optical drive; discs "
                           "can be changed while the machine runs.",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 40, justify="left").grid(
-            row=2, column=0, sticky="w", pady=(6, 0))
+            row=3, column=0, sticky="w", pady=(6, 0))
         self.new_disk_button = None
         if paths.qemu_img_binary().is_file():
             self.new_disk_button = ttk.Button(f, text="New disk…", command=self._new_disk)
-            self.new_disk_button.grid(row=3, column=0, sticky="w", pady=(8, 0))
+            self.new_disk_button.grid(row=4, column=0, sticky="w", pady=(8, 0))
 
     def _new_disk(self):
         dlg = CreateDiskDialog(self, self.collect(), self.machine_folder())
@@ -368,8 +339,6 @@ class MachineEditor(tk.Toplevel):
 
     def _build_network(self):
         f = self._tab("Network")
-        ttk.Label(f, text="Network", font=("", 0, "bold")).grid(
-            row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
         ttk.Label(f, text="Connection:").grid(row=1, column=0, sticky="w")
         self.net_mode = tk.StringVar(value=model.network_mode_label("user"))
         self.net_mode_cb = ttk.Combobox(f, textvariable=self.net_mode, state="readonly", width=18,
@@ -387,8 +356,7 @@ class MachineEditor(tk.Toplevel):
                                                                pady=(6, 0))
         ff = ttk.Frame(f)
         ff.grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
-        ttk.Label(ff, text="Port forwarding", font=("", 0, "bold")).grid(
-            row=0, column=0, columnspan=5, sticky="w")
+        self._heading(ff, "Port forwarding", 0, columnspan=5)
         ttk.Label(ff, text="Forward a port on this Mac to the guest: host 8080 -> guest 80. "
                            "Default (slirp) only." + ("" if paths.is_windows(paths.HOST_PLATFORM) else
                                                    " Host ports below 1024 start the machine with sudo."),
@@ -424,35 +392,35 @@ class MachineEditor(tk.Toplevel):
     def _build_share(self):
         f = self._tab("Shared folder")
         f.columnconfigure(1, weight=1)
-        ttk.Label(f, text="Folder:").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(f, text="Folder:").grid(row=1, column=0, sticky="w", pady=4)
         self.share_folder_var = tk.StringVar()
         ttk.Entry(f, textvariable=self.share_folder_var, width=40).grid(
-            row=0, column=1, sticky="ew", pady=4)
+            row=1, column=1, sticky="ew", pady=4)
         ttk.Button(f, text="Choose…", command=self._choose_share_folder).grid(
-            row=0, column=2, sticky="w", padx=4, pady=4)
+            row=1, column=2, sticky="w", padx=4, pady=4)
 
         self.share_ftp = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="Serve over FTP", variable=self.share_ftp,
-                        command=self._share_changed).grid(row=1, column=0, columnspan=3,
+                        command=self._share_changed).grid(row=2, column=0, columnspan=3,
                                                           sticky="w", pady=(8, 0))
-        ttk.Label(f, text="User:").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Label(f, text="User:").grid(row=3, column=0, sticky="w", pady=4)
         self.share_user_var = tk.StringVar(value=Share().user)
         self.share_user_entry = ttk.Entry(f, textvariable=self.share_user_var, width=20)
-        self.share_user_entry.grid(row=2, column=1, sticky="w", pady=4)
-        ttk.Label(f, text="Password:").grid(row=3, column=0, sticky="w", pady=4)
+        self.share_user_entry.grid(row=3, column=1, sticky="w", pady=4)
+        ttk.Label(f, text="Password:").grid(row=4, column=0, sticky="w", pady=4)
         self.share_password_var = tk.StringVar()
         self.share_password_entry = ttk.Entry(f, textvariable=self.share_password_var,
                                               width=20, show="*")
-        self.share_password_entry.grid(row=3, column=1, sticky="w", pady=4)
+        self.share_password_entry.grid(row=4, column=1, sticky="w", pady=4)
         self.share_scope = tk.StringVar(value="guest-only")
         self.share_scope_rbs = [
             ttk.Radiobutton(f, text="Guest only", variable=self.share_scope, value="guest-only"),
             ttk.Radiobutton(f, text="All interfaces (needs a password)",
                             variable=self.share_scope, value="all-interfaces")]
-        self.share_scope_rbs[0].grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
-        self.share_scope_rbs[1].grid(row=5, column=0, columnspan=3, sticky="w")
+        self.share_scope_rbs[0].grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        self.share_scope_rbs[1].grid(row=6, column=0, columnspan=3, sticky="w")
         ttk.Label(f, text="In the Mac: ftp://10.0.2.2/ with the default network setting.",
-                  foreground=GREY).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+                  foreground=GREY).grid(row=7, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         self._share_changed()
 
@@ -472,20 +440,32 @@ class MachineEditor(tk.Toplevel):
         f.columnconfigure(0, weight=1)
         self.usb_tablet_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text="USB tablet (absolute pointer; off: a USB mouse)",
-                        variable=self.usb_tablet_var).grid(row=0, column=0, sticky="w")
-        self.builtin_audio_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f, text="Built-in audio (Mac Pro sound output and line in)",
-                        variable=self.builtin_audio_var).grid(row=1, column=0, sticky="w")
-        self.startup_chime_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f, text="Startup chime (needs built-in audio)",
-                        variable=self.startup_chime_var).grid(row=2, column=0, sticky="w")
+                        variable=self.usb_tablet_var).grid(row=1, column=0, sticky="w")
         self.usb_audio_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="USB audio device (sound out and microphone in)",
-                        variable=self.usb_audio_var).grid(row=3, column=0, sticky="w")
+                        variable=self.usb_audio_var).grid(row=2, column=0, sticky="w")
         if paths.HOST_PLATFORM == "darwin":
             self._build_usb_host(f)
         elif paths.is_windows(paths.HOST_PLATFORM):
             self._build_usb_host_win(f)
+
+    def _build_sound(self):
+        f = self._tab("Sound")
+        f.columnconfigure(0, weight=1)
+        self.builtin_audio_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f, text="Built-in audio (Mac Pro sound output and line in)",
+                        variable=self.builtin_audio_var,
+                        command=self._audio_changed).grid(row=1, column=0, sticky="w")
+        self.startup_chime_var = tk.BooleanVar(value=True)
+        self.startup_chime_cb = ttk.Checkbutton(f, text="Startup chime",
+                                                variable=self.startup_chime_var)
+        self.startup_chime_cb.grid(row=2, column=0, sticky="w", padx=(20, 0))
+        ttk.Label(f, text="The chime plays through the built-in audio.", foreground=GREY).grid(
+            row=3, column=0, sticky="w", padx=(20, 0))
+
+    def _audio_changed(self):
+        self.startup_chime_cb.state(["!disabled"] if self.builtin_audio_var.get()
+                                    else ["disabled"])
 
     def _build_usb_host(self, f):
         ttk.Separator(f).grid(row=3, column=0, sticky="ew", pady=10)
@@ -551,30 +531,30 @@ class MachineEditor(tk.Toplevel):
     def _collect_usb_host(self) -> list[UsbHostDevice]:
         return [self.usb_host_info[i] for i, v in self.usb_host_vars.items() if v.get()]
 
-    # Windows: QEMU opens only devices on WinUSB; winusb-switch moves them.
+    # Windows: QEMU opens only devices given to it (on WinUSB); the main
+    # window's USB devices… dialog gives and takes them back.
 
     def _build_usb_host_win(self, f):
         ttk.Separator(f).grid(row=3, column=0, sticky="ew", pady=10)
         f.rowconfigure(5, weight=1)
-        ttk.Label(f, text="Host USB devices this machine takes while it runs. QEMU can use a "
-                          "device only while it is on Windows' WinUSB driver: Give to QEMU puts "
-                          "it there, Give back to Windows returns it; each asks once for "
-                          "administrator rights. High-speed devices go on a USB 2.0 controller "
-                          "added to the machine, others on the USB 1.1 controller.",
+        ttk.Label(f, text="Devices of this computer the machine passes through. Only a device "
+                          "given to QEMU can be ticked; USB devices… in the main window gives "
+                          "devices to QEMU.",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
             row=4, column=0, sticky="ew", pady=(0, 6))
         self.usb_host_list = ttk.Frame(f)
         self.usb_host_list.grid(row=5, column=0, sticky="nsew")
-        self.usb_status = ttk.Label(f, text="", wraplength=EDITOR_WIDTH - 60, justify="left")
-        self.usb_status.grid(row=6, column=0, sticky="ew", pady=(6, 0))
         self._usb_win = True
-        self.usb_busy = False
         self.usb_host_vars: dict[str, tk.BooleanVar] = {}
         self.usb_host_info: dict[str, UsbHostDevice] = {}
         self.usb_host_boxes: dict[str, ttk.Checkbutton] = {}
         self.usb_host_notes: dict[str, ttk.Label] = {}
-        self.usb_host_buttons: dict[str, tuple[ttk.Button, ttk.Button]] = {}
         self.usb_host_plugged: dict[str, winusb.WinDevice] = {}
+
+    def refresh_usb_host(self):
+        """After devices were given or taken back; the ticks stay."""
+        if hasattr(self, "usb_host_list"):
+            self._fill_usb_host(self._collect_usb_host())
 
     def _fill_usb_host_win(self, chosen: list[UsbHostDevice]):
         lst = self.usb_host_list
@@ -590,24 +570,11 @@ class MachineEditor(tk.Toplevel):
         self.usb_host_info = {}
         self.usb_host_boxes = {}
         self.usb_host_notes = {}
-        self.usb_host_buttons = {}
-        # Refused devices stay out, unless one is on WinUSB and can go back
         hidden = [i for i, d in plugged.items() if d.refuse and not d.winusb]
         rows = [i for i in plugged if i not in hidden] + \
                [i for i in picked if i not in plugged]
-        self.usb_hidden_label = ttk.Label(lst, text=usbhost.hidden_note(len(hidden)),
-                                          foreground=GREY)
-        self.usb_hidden_label.grid(row=2 * len(rows) + 2, column=0, columnspan=3,
-                                   sticky="w", pady=(6, 0))
-        # UsbDk, libusbK, libusb0: may keep devices from their Windows drivers
-        self.usb_warning_label = ttk.Label(lst, text=winusb.warnings_text(devices),
-                                           foreground="red", wraplength=EDITOR_WIDTH - 60,
-                                           justify="left")
-        self.usb_warning_label.grid(row=2 * len(rows) + 3, column=0, columnspan=3,
-                                    sticky="w")
         if problem:
-            ttk.Label(lst, text=problem, foreground=GREY).grid(row=0, column=0, columnspan=3,
-                                                               sticky="w")
+            ttk.Label(lst, text=problem, foreground=GREY).grid(row=0, column=0, sticky="w")
         elif not rows:
             ttk.Label(lst, text="No USB device is plugged in.",
                       foreground=GREY).grid(row=0, column=0, sticky="w")
@@ -618,38 +585,26 @@ class MachineEditor(tk.Toplevel):
             if d is not None:
                 name = d.product or d.description or (p.name if p else "")
                 info = UsbHostDevice(dev_id, name, d.speed or (p.speed if p else ""))
-                text = f"{name or d.label}  ({dev_id}, {d.speed or '?'} speed) -- {d.state}"
+                text = f"{name or d.label}  ({dev_id}, {d.speed or '?'} speed): {d.state}"
                 if d.refuse:
-                    text += f" -- {d.refuse}"
+                    text += f"; cannot be passed through ({d.refuse})"
             else:
                 info = p
                 text = (f"{info.name or 'USB device ' + dev_id}  ({dev_id}, "
-                        f"{info.speed or '?'} speed) -- not connected")
+                        f"{info.speed or '?'} speed): not plugged in")
             refused = d is not None and bool(d.refuse)
-            # A saved tick stays even while Windows owns the device
+            # A saved tick stays even while Windows uses the device
             var = tk.BooleanVar(value=dev_id in picked and not refused)
             box = ttk.Checkbutton(lst, text=text, variable=var)
             box.grid(row=r, column=0, sticky="w")
-            give = ttk.Button(lst, text="Give to QEMU",
-                              command=lambda i=dev_id: self._usb_switch("bind", i))
-            back = ttk.Button(lst, text="Give back to Windows",
-                              command=lambda i=dev_id: self._usb_switch("unbind", i))
-            give.grid(row=r, column=1, padx=2)
-            back.grid(row=r, column=2, padx=2)
             note = ttk.Label(lst, text="", foreground=GREY)
-            note.grid(row=r + 1, column=0, columnspan=3, sticky="w")
-            # Only a device QEMU owns (on WinUSB) can be ticked
+            note.grid(row=r + 1, column=0, sticky="w")
             if refused or (d is not None and not d.winusb):
                 box.state(["disabled"])
-            if refused or d is None or d.winusb:
-                give.state(["disabled"])
-            if d is None or not d.winusb:      # a refused one may still go back
-                back.state(["disabled"])
             self.usb_host_vars[dev_id] = var
             self.usb_host_info[dev_id] = info
             self.usb_host_boxes[dev_id] = box
             self.usb_host_notes[dev_id] = note
-            self.usb_host_buttons[dev_id] = (give, back)
             var.trace_add("write", lambda *_a, i=dev_id: self._usb_note(i))
             self._usb_note(dev_id)
 
@@ -657,44 +612,6 @@ class MachineEditor(tk.Toplevel):
         d = self.usb_host_plugged.get(dev_id)
         waiting = self.usb_host_vars[dev_id].get() and d is not None and not d.winusb
         self.usb_host_notes[dev_id].config(text=f"    {winusb.NOT_READY_NOTE}" if waiting else "")
-
-    def _usb_switch(self, op: str, dev_id: str, wait: bool = False):
-        """Run winusb-switch elevated for one device; *wait* runs it in line
-        (tests), otherwise on a thread so the window stays alive."""
-        if self.usb_busy:
-            return
-        self.usb_busy = True
-        self.usb_status.config(text="Waiting for the administrator prompt ...")
-        for give, back in self.usb_host_buttons.values():
-            give.state(["disabled"])
-            back.state(["disabled"])
-        if wait:
-            self._usb_switched(winusb.run_elevated(op, dev_id))
-            return
-        box: dict = {}
-        worker = threading.Thread(
-            target=lambda: box.setdefault("res", winusb.run_elevated(op, dev_id)), daemon=True)
-        worker.start()
-
-        def poll():
-            try:
-                if worker.is_alive():
-                    self.after(200, poll)
-                    return
-                self._usb_switched(box.get("res") or
-                                   {"op": op, "id": dev_id, "ok": False, "error": "no result"})
-            except tk.TclError:
-                pass        # the editor was closed meanwhile
-        self.after(200, poll)
-
-    def _usb_switched(self, res: dict):
-        self.usb_busy = False
-        self._fill_usb_host_win(self._collect_usb_host())
-        self.usb_status.config(text=winusb.outcome_text(res))
-        # The main window's command line follows the new ownership
-        refresh = getattr(self.master, "refresh_details", None)
-        if callable(refresh):
-            refresh()
 
     def _ram_values(self):
         """Memory sizes for the chosen model; the current one stays."""
@@ -707,19 +624,40 @@ class MachineEditor(tk.Toplevel):
     def _build_advanced(self):
         f = self._tab("Advanced")
         f.columnconfigure(1, weight=1)
-        ttk.Label(f, text="Date and time:").grid(row=0, column=0, sticky="w", pady=(0, 0))
+        self._heading(f, "Start-up", 1, top=4)
+        self.picker_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Show the boot picker at start",
+                        variable=self.picker_var).grid(row=2, column=0, columnspan=3, sticky="w")
+        self.verbose_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Verbose boot", variable=self.verbose_var).grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self.serial_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Write a serial log (serial.log in the machine folder)",
+                        variable=self.serial_var).grid(row=4, column=0, columnspan=3,
+                                                       sticky="w", pady=(4, 0))
+        ttk.Label(f, text="Extra kernel arguments:").grid(row=5, column=0, sticky="w",
+                                                          pady=(8, 0))
+        self.boot_args_var = tk.StringVar()
+        ttk.Entry(f, textvariable=self.boot_args_var, width=40).grid(
+            row=5, column=1, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(f, text="Added after keepsyms=1 debug=0x100 (debug=0x108 serial=3 with a "
+                          "serial log).",
+                  foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
+            row=6, column=0, columnspan=3, sticky="w")
+        ttk.Separator(f).grid(row=7, column=0, columnspan=3, sticky="ew", pady=10)
+        self._heading(f, "Clock", 8)
+        ttk.Label(f, text="Date and time:").grid(row=9, column=0, sticky="w")
         self.rtc_base_var = tk.StringVar()
         ttk.Combobox(f, textvariable=self.rtc_base_var, values=list(model.RTC_BASE_CHOICES),
-                     width=28).grid(row=0, column=1, sticky="w")
+                     width=28).grid(row=9, column=1, sticky="w")
         ttk.Label(f, text="Empty: the host's clock (UTC). localtime: the host's local time. "
                           "Or a fixed start like 2005-04-29T10:30:00.",
-                  foreground=GREY).grid(row=1, column=0, columnspan=3, sticky="w")
-        ttk.Separator(f).grid(row=2, column=0, columnspan=3, sticky="ew", pady=10)
-        ttk.Label(f, text="Additional command line arguments", font=("", 0, "bold")).grid(
-            row=3, column=0, columnspan=3, sticky="w", pady=(0, 4))
+                  foreground=GREY).grid(row=10, column=0, columnspan=3, sticky="w")
+        ttk.Separator(f).grid(row=11, column=0, columnspan=3, sticky="ew", pady=10)
+        self._heading(f, "Additional command line arguments", 12)
         self.extra_var = tk.StringVar()
         ttk.Entry(f, textvariable=self.extra_var, width=70).grid(
-            row=4, column=0, columnspan=3, sticky="ew")
+            row=13, column=0, columnspan=3, sticky="ew")
 
     def load(self, m: Machine):
         self.name_var.set(m.name)
@@ -736,7 +674,6 @@ class MachineEditor(tk.Toplevel):
         self._vnc_changed()
         self.gpu_var.set(model.gpu_label(m.gpu))
         self.resolution_var.set(m.resolution)
-        self.gpu_accel_var.set(m.gpu_accel)
         self._gpu_changed()
         self.picker_var.set(m.show_picker)
         self.boot_args_var.set(m.boot_args)
@@ -757,6 +694,7 @@ class MachineEditor(tk.Toplevel):
         self._net_mode_changed()
         self.builtin_audio_var.set(m.builtin_audio)
         self.startup_chime_var.set(m.startup_chime)
+        self._audio_changed()
         self.usb_audio_var.set(m.usb_audio)
         self.usb_tablet_var.set(m.usb_tablet)
         self.share_folder_var.set(m.share.folder)
@@ -787,7 +725,6 @@ class MachineEditor(tk.Toplevel):
         m.display = self.display_var.get()
         m.vnc = self.vnc_var.get().strip() if self.vnc_on.get() else ""
         m.gpu = model.gpu_by_label(self.gpu_var.get())
-        m.gpu_accel = self.gpu_accel_var.get() and m.gpu == model.GPU_HD5770
         m.resolution = self.resolution_var.get()
         m.show_picker = self.picker_var.get()
         m.boot_args = " ".join(self.boot_args_var.get().split())

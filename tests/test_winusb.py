@@ -45,8 +45,8 @@ class ListFormat(unittest.TestCase):
         self.assertTrue(cam.switchable)
         self.assertEqual(cam.speed, "high")
         self.assertEqual(rx.speed, "full")
-        self.assertEqual(cam.state, "Windows driver (usbccgp)")
-        self.assertEqual(dvd.state, "WinUSB (ready for QEMU)")
+        self.assertEqual(cam.state, "used by Windows")
+        self.assertEqual(dvd.state, "given to QEMU")
         self.assertEqual(cam.label, "Camera")
         self.assertTrue(dvd.winusb)
         self.assertEqual(dvd.inf, "oem42.inf")
@@ -66,8 +66,21 @@ class ListFormat(unittest.TestCase):
         devs = wl.parse_list(text)
         self.assertEqual(len(devs), 3)
         self.assertEqual(len(devs.warnings), 2)
-        self.assertTrue(wl.warnings_text(devs).startswith("UsbDk filter installed"))
+        self.assertTrue(wl.warnings_text(devs).startswith("UsbDk is installed"))
+        general, per = wl.explain_warnings(devs)
+        self.assertEqual(len(general), 1)
+        self.assertIn("libusbK driver (oem12.inf)", per["046d:0a37"][0])
         self.assertEqual(wl.warnings_text([]), "")
+
+    def test_a_device_filter_is_a_note_of_that_device(self):
+        devs = wl.parse_list(LIST.replace('"warnings":[]', '"warnings":["8087:0026 lower '
+                                          'filter ibtusb installed","USB class lower filter '
+                                          'foo installed"]'))
+        general, per = wl.explain_warnings(devs)
+        self.assertEqual(list(per), ["8087:0026"])
+        self.assertIn("extra driver ibtusb", per["8087:0026"][0])
+        self.assertEqual(len(general), 1)
+        self.assertIn("The driver foo sits under every USB device", general[0])
 
     def test_bad_lines(self):
         with self.assertRaises(ValueError):
@@ -184,27 +197,27 @@ class Helper(unittest.TestCase):
         self.assertTrue(params.startswith("bind 046d:0990 --out "))
         self.assertTrue(res["ok"])
         self.assertEqual(res["exit"], 0)
-        self.assertEqual(wl.outcome_text(res), "Given to QEMU: the device is on WinUSB.")
+        self.assertEqual(wl.outcome_text(res), "Given to QEMU: machines can now pass it through.")
 
     def test_outcomes(self):
         self.install()
         self.fake_runas(None)
         self.assertEqual(wl.outcome_text(wl.run_elevated("unbind", "046d:0990")),
-                         "Nothing changed: the administrator prompt was cancelled.")
+                         "Nothing changed: the Windows permission prompt was cancelled.")
         self.fake_runas({"op": "unbind", "ok": False, "refuse": "in use", "veto_type": 5}, 5)
-        self.assertIn("Quit the program using it (QEMU, Camera app) first",
+        self.assertIn("Quit it (a running machine, the Camera app)",
                       wl.outcome_text(wl.run_elevated("unbind", "046d:0990")))
         self.fake_runas({"op": "unbind", "ok": True, "reboot": True,
                          "status": "pending_reboot"}, 3010)
         self.assertEqual(wl.outcome_text(wl.run_elevated("unbind", "046d:0990")),
-                         "Replug the device to finish.")
+                         "Unplug the device and plug it in again to finish.")
         self.fake_runas({"op": "unbind", "ok": True, "service": "usbccgp", "status": "done"})
         self.assertEqual(wl.outcome_text(wl.run_elevated("unbind", "046d:0990")),
-                         "Given back to Windows (usbccgp).")
+                         "Given back to Windows.")
         self.fake_runas({"op": "bind", "ok": False, "error": "cannot open device",
                          "detail": {"code": "0x2", "message": "not found"}}, 1)
         self.assertEqual(wl.outcome_text(wl.run_elevated("bind", "046d:0990")),
-                         "Failed: cannot open device (not found).")
+                         "Could not give the device to QEMU: cannot open device (not found).")
 
     def test_no_result_file(self):
         self.install()
@@ -252,18 +265,34 @@ class WindowsEditorTab(unittest.TestCase):
     def text(self, ed, dev_id):
         return ed.usb_host_boxes[dev_id].cget("text")
 
+    def dialog(self):
+        import tkinter as tk
+        from qemugui.x86_ui_usb import UsbDevicesDialog
+        root = tk.Tk()
+        root.withdraw()
+        self.roots.append(root)
+        calls = []
+        dlg = UsbDevicesDialog(root, on_change=lambda: calls.append(1))
+        dlg.withdraw()
+        return dlg, calls
+
     def test_rows_state_speed_and_hidden_refusals(self):
         ed = self.editor(Machine(name="t"))
         self.assertEqual(list(ed.usb_host_vars), ["046d:0990", "0e8d:1887"])
-        self.assertTrue(ed.usb_hidden_label.cget("text").startswith("1 device hidden ("))
         self.assertEqual(self.text(ed, "046d:0990"),
-                         "Camera  (046d:0990, high speed) -- Windows driver (usbccgp)")
+                         "Camera  (046d:0990, high speed): used by Windows")
         self.assertEqual(self.text(ed, "0e8d:1887"),
-                         "MT1887  (0e8d:1887, high speed) -- WinUSB (ready for QEMU)")
-        give, back = ed.usb_host_buttons["046d:0990"]
+                         "MT1887  (0e8d:1887, high speed): given to QEMU")
+        self.assertFalse(any(w.winfo_class() == "TButton"
+                             for w in ed.usb_host_list.winfo_children()))
+
+    def test_dialog_buttons_follow_ownership(self):
+        dlg, _calls = self.dialog()
+        self.assertEqual(list(dlg.buttons), ["046d:0990", "0e8d:1887"])
+        give, back = dlg.buttons["046d:0990"]
         self.assertNotIn("disabled", give.state())
         self.assertIn("disabled", back.state())
-        give, back = ed.usb_host_buttons["0e8d:1887"]
+        give, back = dlg.buttons["0e8d:1887"]
         self.assertIn("disabled", give.state())
         self.assertNotIn("disabled", back.state())
 
@@ -272,10 +301,10 @@ class WindowsEditorTab(unittest.TestCase):
                                '"product":"ITE Device","speed":"full","service":"WinUSB",'
                                '"winusb":true,"refuse":"HID only"}\n')
         ed = self.editor(Machine(name="t"))
-        self.assertIn("048d:5702", ed.usb_host_vars)
         self.assertIn("HID only", self.text(ed, "048d:5702"))
         self.assertIn("disabled", ed.usb_host_boxes["048d:5702"].state())
-        give, back = ed.usb_host_buttons["048d:5702"]
+        dlg, _calls = self.dialog()
+        give, back = dlg.buttons["048d:5702"]
         self.assertIn("disabled", give.state())
         self.assertNotIn("disabled", back.state())
 
@@ -293,26 +322,22 @@ class WindowsEditorTab(unittest.TestCase):
             UsbHostDevice("046d:0990", "Camera", "high")]))
         self.assertTrue(ed.usb_host_vars["046d:0990"].get())
         self.assertIn("disabled", ed.usb_host_boxes["046d:0990"].state())
-        self.assertIn("not passed through: owned by Windows",
+        self.assertIn("give it to QEMU with USB devices",
                       ed.usb_host_notes["046d:0990"].cget("text"))
-        give, _back = ed.usb_host_buttons["046d:0990"]
-        self.assertNotIn("disabled", give.state())
         self.assertEqual(ed.collect().usb_host_devices,
                          [UsbHostDevice("046d:0990", "Camera", "high")])
 
-    def test_switch_refreshes_the_main_window(self):
-        ed = self.editor(Machine(name="t"))
-        calls = []
-        ed.master.refresh_details = lambda: calls.append(1)
+    def test_switch_tells_the_main_window(self):
+        dlg, calls = self.dialog()
         wl.run_elevated = lambda op, i, folder=None: {"op": op, "ok": True, "status": "done"}
-        ed._usb_switch("bind", "046d:0990", wait=True)
+        dlg.switch("bind", "046d:0990", wait=True)
         self.assertEqual(calls, [1])
 
-    def test_give_to_qemu_refreshes_and_keeps_ticks(self):
+    def test_give_to_qemu_then_the_editor_refreshes_and_keeps_ticks(self):
         ed = self.editor(Machine(name="t", usb_host_devices=[
             UsbHostDevice("046d:0990", "Camera", "high"),
             UsbHostDevice("dead:beef", "Old scanner", "full")]))
-        self.assertIn("not connected", self.text(ed, "dead:beef"))
+        self.assertIn("not plugged in", self.text(ed, "dead:beef"))
 
         def run(op, dev_id, folder=None):
             self.runs.append((op, dev_id))
@@ -322,34 +347,39 @@ class WindowsEditorTab(unittest.TestCase):
                                         'Device","composite":false,"winusb":true', 1)
             return {"op": op, "id": dev_id, "ok": True, "status": "done", "exit": 0}
         wl.run_elevated = run
-        ed._usb_switch("bind", "046d:0990", wait=True)
+        dlg, _calls = self.dialog()
+        dlg.on_change = ed.refresh_usb_host
+        dlg.switch("bind", "046d:0990", wait=True)
         self.assertEqual(self.runs, [("bind", "046d:0990")])
-        self.assertIn("WinUSB (ready for QEMU)", self.text(ed, "046d:0990"))
+        self.assertIn("given to QEMU", self.text(ed, "046d:0990"))
         self.assertTrue(ed.usb_host_vars["046d:0990"].get())
         self.assertTrue(ed.usb_host_vars["dead:beef"].get())
         self.assertEqual(ed.usb_host_notes["046d:0990"].cget("text"), "")
-        self.assertEqual(ed.usb_status.cget("text"), "Given to QEMU: the device is on WinUSB.")
+        self.assertEqual(dlg.status.cget("text"),
+                         "Given to QEMU: machines can now pass it through.")
 
     def test_in_use_and_cancel_messages(self):
-        ed = self.editor(Machine(name="t"))
+        dlg, _calls = self.dialog()
         wl.run_elevated = lambda op, i, folder=None: {"op": op, "ok": False,
                                                       "refuse": "in use", "exit": 5}
-        ed._usb_switch("unbind", "0e8d:1887", wait=True)
-        self.assertIn("Quit the program using it", ed.usb_status.cget("text"))
+        dlg.switch("unbind", "0e8d:1887", wait=True)
+        self.assertIn("a program is using the device", dlg.status.cget("text"))
         wl.run_elevated = lambda op, i, folder=None: {"op": op, "ok": False, "cancelled": True}
-        ed._usb_switch("bind", "046d:0990", wait=True)
-        self.assertIn("cancelled", ed.usb_status.cget("text"))
-        self.assertFalse(ed.usb_busy)
+        dlg.switch("bind", "046d:0990", wait=True)
+        self.assertIn("cancelled", dlg.status.cget("text"))
+        self.assertFalse(dlg.busy)
 
     def test_warnings_line(self):
         self.listing = LIST.replace('"warnings":[]',
                                     '"warnings":["UsbDk filter installed (from virt-viewer?)'
-                                    ' - devices may not return to their Windows drivers"]')
-        ed = self.editor(Machine(name="t"))
-        self.assertTrue(ed.usb_warning_label.cget("text").startswith("UsbDk filter installed"))
+                                    ' - devices may not return to their Windows drivers",'
+                                    '"8087:0026 lower filter ibtusb installed"]')
+        dlg, _calls = self.dialog()
+        self.assertTrue(dlg.warning_label.cget("text").startswith("UsbDk is installed"))
+        self.assertNotIn("ibtusb", dlg.warning_label.cget("text"))   # not a listed device
         self.listing = LIST
-        ed2 = self.editor(Machine(name="t"))
-        self.assertEqual(ed2.usb_warning_label.cget("text"), "")
+        dlg2, _calls = self.dialog()
+        self.assertEqual(dlg2.warning_label.cget("text"), "")
 
     def test_helper_missing_is_said(self):
         wl.list_devices = lambda folder=None: ([], wl.missing_message())
@@ -405,7 +435,7 @@ class WindowsMainWindowCommandLine(unittest.TestCase):
         text = self.preview(w)
         self.assertIn("vendorid=0x0e8d,productid=0x1887", text)
         self.assertNotIn("vendorid=0x046d,productid=0x0990", text)
-        self.assertIn("owned by Windows (Give to QEMU first): 046d:0990", text)
+        self.assertIn("while Windows uses them (USB devices… > Give to QEMU): 046d:0990", text)
 
     def test_missing_helper_passes_nothing(self):
         self.listing = ([], wl.missing_message())

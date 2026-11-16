@@ -420,7 +420,6 @@ class Machine:
     display: str = "cocoa"
     vnc: str = ""                  # "" = off; else a -vnc display spec, e.g. ":1"
     gpu: str = GPU_DEFAULT
-    gpu_accel: bool = False        # HD 5770 only: its accelerator, on the host's GPU
     resolution: str = RESOLUTION_DEFAULT
     show_picker: bool = False
     boot_args: str = ""            # kernel arguments after the fixed ones
@@ -452,7 +451,6 @@ class Machine:
             "display": self.display,
             "vnc": self.vnc,
             "gpu": self.gpu,
-            "gpu_accel": self.gpu_accel,
             "resolution": self.resolution,
             "show_picker": self.show_picker,
             "boot_args": self.boot_args,
@@ -487,7 +485,6 @@ class Machine:
             display=str(d.get("display") or default_display(paths.HOST_PLATFORM)),
             vnc=str(d.get("vnc", "") or ""),
             gpu=str(d.get("gpu") or GPU_DEFAULT),
-            gpu_accel=bool(d.get("gpu_accel", False)),
             resolution=str(d.get("resolution") or RESOLUTION_DEFAULT),
             show_picker=bool(d.get("show_picker", False)),
             boot_args=str(d.get("boot_args", "") or ""),

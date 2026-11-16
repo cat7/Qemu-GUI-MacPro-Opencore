@@ -77,10 +77,26 @@ class MachineTab(EditorCase):
 
     def test_comboboxes_offer_the_fixed_choices(self):
         ed = self._editor(Machine(name="t"))
-        self.assertEqual(list(ed.model_var and ed.nb.winfo_children()[0].winfo_children()[3]
+        self.assertEqual(list(ed.model_var and ed.nb.winfo_children()[0].winfo_children()[4]
                               .cget("values")), list(model.MAC_MODELS))
         self.assertEqual(model.SMP_CHOICES, (1, 2, 4, 8))
         self.assertEqual(model.RAM_CHOICES[:4], (1024, 2048, 3072, 4096))
+
+    def test_tabs_and_their_headings(self):
+        ed = self._editor(Machine(name="t"))
+        titles = [ed.nb.tab(t, "text") for t in ed.nb.tabs()]
+        self.assertEqual(titles[:4], ["Machine", "Drives", "Display", "Sound"])
+        self.assertEqual(titles[-1], "Advanced")
+        for t in ed.nb.tabs():
+            first = ed.nametowidget(t).grid_slaves(row=0, column=0)
+            self.assertEqual(first[0].cget("text"), ed.nb.tab(t, "text"))
+
+    def test_the_chime_needs_built_in_audio(self):
+        ed = self._editor(Machine(name="t", builtin_audio=False))
+        self.assertIn("disabled", ed.startup_chime_cb.state())
+        ed.builtin_audio_var.set(True)
+        ed._audio_changed()
+        self.assertNotIn("disabled", ed.startup_chime_cb.state())
 
     def test_the_uuid_survives_editing(self):
         m = model.new_machine("t")

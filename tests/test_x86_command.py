@@ -232,13 +232,14 @@ class GoldenCommandLines(unittest.TestCase):
             "-vga", "none",
             "-device", "pci-bridge,id=br1,bus=pcie.0,addr=0x1,chassis_nr=1,shpc=off",
             "-device", f"ati-radeon-hd5770,bus=br1,addr=0x0,romfile={QD}/ati-hd5770-gop.rom,"
-                       "xres=1680,yres=1050"])
+                       "xres=1680,yres=1050,accel=on"])
 
-    def test_the_hd5770_accelerator_is_a_card_property(self):
-        card = argv_of(plain(gpu="hd5770", gpu_accel=True))
+    def test_the_hd5770_accelerator_is_always_on(self):
+        card = argv_of(plain(gpu="hd5770"))
         self.assertTrue(card[card.index("-vga") + 5].endswith(",xres=1440,yres=900,accel=on"))
-        self.assertNotIn("accel=on", " ".join(argv_of(plain(gpu="hd5770"))))
-        self.assertNotIn("accel=on", " ".join(argv_of(plain(gpu="x1900", gpu_accel=True))))
+        self.assertNotIn("accel=on", " ".join(argv_of(plain(gpu="x1900"))))
+        old = Machine.from_dict({**plain(gpu="hd5770").to_dict(), "gpu_accel": False})
+        self.assertIn("accel=on", " ".join(argv_of(old)))
 
     def test_a_fixture_record_end_to_end(self):
         m = Machine.load(FIXTURES / "x86-leopard.json")

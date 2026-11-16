@@ -32,9 +32,10 @@ CREATE_NO_WINDOW = 0x08000000
 
 ID_RE = re.compile(r"^[0-9a-f]{4}:[0-9a-f]{4}$")
 
-WINUSB_STATE = "WinUSB (ready for QEMU)"
-WINDOWS_STATE = "Windows driver"
-NOT_READY_NOTE = "not passed through: owned by Windows"
+WINUSB_STATE = "given to QEMU"
+WINDOWS_STATE = "used by Windows"
+NOT_READY_NOTE = ("not passed through while Windows uses it: give it to QEMU with "
+                  "USB devices… in the main window")
 
 
 @dataclass
@@ -66,9 +67,7 @@ class WinDevice:
 
     @property
     def state(self) -> str:
-        if self.winusb:
-            return WINUSB_STATE
-        return f"{WINDOWS_STATE} ({self.service})" if self.service else WINDOWS_STATE
+        return WINUSB_STATE if self.winusb else WINDOWS_STATE
 
 
 class DeviceList(list):
@@ -77,9 +76,45 @@ class DeviceList(list):
     warnings: list = []
 
 
+_DEV_FILTER_RE = re.compile(r"^([0-9a-f]{4}:[0-9a-f]{4}) (?:upper|lower) filter (\S+) installed$")
+_CLASS_FILTER_RE = re.compile(r"^USB class (?:upper|lower) filter (\S+) installed$")
+_PACKAGE_RE = re.compile(r"^([0-9a-f]{4}:[0-9a-f]{4}): driver package (\S+) installs (\S+)$")
+
+
+def explain_warnings(devices) -> tuple[list[str], dict[str, list[str]]]:
+    """The list's warnings in plain words: (for the whole computer, per
+    device id). Device notes are kept only for listed devices."""
+    general: list[str] = []
+    per_device: dict[str, list[str]] = {}
+    for w in getattr(devices, "warnings", []) or []:
+        w = str(w)
+        m = _DEV_FILTER_RE.match(w)
+        if m:
+            per_device.setdefault(m.group(1), []).append(
+                f"Windows loads the extra driver {m.group(2)} with this device; "
+                "giving it to QEMU may not work while that driver is there.")
+            continue
+        m = _PACKAGE_RE.match(w)
+        if m:
+            per_device.setdefault(m.group(1), []).append(
+                f"A {m.group(3)} driver ({m.group(2)}) is installed for this device; "
+                "Windows may pick it instead of its own driver when the device is given back.")
+            continue
+        m = _CLASS_FILTER_RE.match(w)
+        if m:
+            general.append(f"The driver {m.group(1)} sits under every USB device of this "
+                           "computer; it can keep QEMU from opening a device given to it.")
+        elif w.startswith("UsbDk"):
+            general.append("UsbDk is installed (it comes with virt-viewer and similar tools); "
+                           "a device given back to Windows may not get its Windows driver back.")
+        else:
+            general.append(w)
+    return general, per_device
+
+
 def warnings_text(devices) -> str:
-    """The list's warnings in one line, "" if none."""
-    return "; ".join(str(w) for w in getattr(devices, "warnings", []) or [])
+    """The warnings for the whole computer, one per line; "" if none."""
+    return "\n".join(explain_warnings(devices)[0])
 
 
 def _obj(line: str) -> dict:
@@ -184,7 +219,7 @@ def passthrough_note(chosen: list[str], owned: set[str] | None, why: str) -> str
     left = [i for i in chosen if i not in owned]
     if not left:
         return ""
-    return ("Not passed through, owned by Windows (Give to QEMU first): "
+    return ("Not passed through while Windows uses them (USB devices… > Give to QEMU): "
             + ", ".join(left))
 
 
@@ -265,20 +300,21 @@ def run_elevated(op: str, dev_id: str, folder: Path | str | None = None) -> dict
 def outcome_text(res: dict) -> str:
     """One line for the editor, from a run_elevated result."""
     if res.get("cancelled"):
-        return "Nothing changed: the administrator prompt was cancelled."
+        return "Nothing changed: the Windows permission prompt was cancelled."
     if res.get("refuse") == "in use" or res.get("exit") == IN_USE:
-        return ("Nothing changed: the device is in use. Quit the program using it "
-                "(QEMU, Camera app) first.")
+        return ("Nothing changed: a program is using the device. Quit it (a running "
+                "machine, the Camera app) and try again.")
     if res.get("ok"):
         if res.get("status") == "pending_reboot":
-            return "Replug the device to finish."
+            return "Unplug the device and plug it in again to finish."
         if res.get("op") == "bind":
-            return ("Already on WinUSB, ready for QEMU." if res.get("already")
-                    else "Given to QEMU: the device is on WinUSB.")
-        service = res.get("service") or "its own driver"
-        return f"Given back to Windows ({service})."
+            return ("The device was already given to QEMU." if res.get("already")
+                    else "Given to QEMU: machines can now pass it through.")
+        return "Given back to Windows."
     if res.get("refuse"):
-        return f"Refused: {res['refuse']}."
+        return f"This device cannot be given to QEMU ({res['refuse']})."
     detail = res.get("detail") or {}
     msg = detail.get("message") if isinstance(detail, dict) else ""
-    return f"Failed: {res.get('error') or 'unknown error'}" + (f" ({msg})" if msg else "") + "."
+    what = "give the device to QEMU" if res.get("op") == "bind" else "give the device back"
+    return (f"Could not {what}: {res.get('error') or 'unknown error'}"
+            + (f" ({msg})" if msg else "") + ".")
