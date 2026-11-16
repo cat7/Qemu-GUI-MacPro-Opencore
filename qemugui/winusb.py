@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import paths
+from . import usbnames
 
 HELPER = "winusb-switch.exe"
 
@@ -60,6 +61,12 @@ class WinDevice:
     @property
     def label(self) -> str:
         return self.product or self.description or f"USB device {self.id}"
+
+    @property
+    def display(self) -> str:
+        """Maker, model and kind, for the lists."""
+        return usbnames.describe(self.id, self.product or self.description,
+                                 usbnames.windows_kinds(self.functions, self.cls, self.service))
 
     @property
     def switchable(self) -> bool:
@@ -210,8 +217,10 @@ def owned_ids(folder: Path | str | None = None) -> tuple[set[str] | None, str]:
     return {d.id for d in devices if d.winusb}, ""
 
 
-def passthrough_note(chosen: list[str], owned: set[str] | None, why: str) -> str:
-    """What the launcher leaves out of the ticked devices, and why; "" if none."""
+def passthrough_note(chosen: list[str], owned: set[str] | None, why: str,
+                     names: dict | None = None) -> str:
+    """What the launcher leaves out of the ticked devices, and why; "" if none.
+    *names*: the saved name of each id."""
     if not chosen:
         return ""
     if owned is None:
@@ -220,7 +229,8 @@ def passthrough_note(chosen: list[str], owned: set[str] | None, why: str) -> str
     if not left:
         return ""
     return ("Not passed through while Windows uses them (USB devices… > Give to QEMU): "
-            + ", ".join(left))
+            + ", ".join(f"{usbnames.describe(i, (names or {}).get(i, ''))} ({i})"
+                        for i in left))
 
 
 def shell_execute_runas(exe: str, params: str) -> int | None:

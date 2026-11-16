@@ -15,6 +15,7 @@ from tkinter import ttk, filedialog, messagebox
 
 from . import paths
 from . import usbhost
+from . import usbnames
 from . import winusb
 from . import x86_model as model
 from .x86_model import Machine, Drive, Network, Share, UsbHostDevice
@@ -511,12 +512,13 @@ class MachineEditor(tk.Toplevel):
             if d is not None:
                 name = d.name or (picked[dev_id].name if dev_id in picked else "")
                 info = UsbHostDevice(dev_id, name, d.speed)
-                text = f"{name or d.label}  ({dev_id}, {d.speed or '?'} speed)"
+                shown = usbnames.describe(dev_id, name, usbnames.iface_kinds(d.iface_classes))
+                text = f"{shown}  ({dev_id}, {d.speed or '?'} speed)"
                 if not d.passable:
                     text += f" -- {d.reason}"
             else:
                 info = picked[dev_id]
-                text = (f"{info.name or 'USB device ' + dev_id}  ({dev_id}, "
+                text = (f"{usbnames.describe(dev_id, info.name)}  ({dev_id}, "
                         f"{info.speed or '?'} speed) -- not connected")
             refused = d is not None and not d.passable
             var = tk.BooleanVar(value=dev_id in picked and not refused)
@@ -585,12 +587,12 @@ class MachineEditor(tk.Toplevel):
             if d is not None:
                 name = d.product or d.description or (p.name if p else "")
                 info = UsbHostDevice(dev_id, name, d.speed or (p.speed if p else ""))
-                text = f"{name or d.label}  ({dev_id}, {d.speed or '?'} speed): {d.state}"
+                text = f"{d.display}  ({dev_id}, {d.speed or '?'} speed): {d.state}"
                 if d.refuse:
                     text += f"; cannot be passed through ({d.refuse})"
             else:
                 info = p
-                text = (f"{info.name or 'USB device ' + dev_id}  ({dev_id}, "
+                text = (f"{usbnames.describe(dev_id, info.name)}  ({dev_id}, "
                         f"{info.speed or '?'} speed): not plugged in")
             refused = d is not None and bool(d.refuse)
             # A saved tick stays even while Windows uses the device

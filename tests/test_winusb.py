@@ -280,9 +280,10 @@ class WindowsEditorTab(unittest.TestCase):
         ed = self.editor(Machine(name="t"))
         self.assertEqual(list(ed.usb_host_vars), ["046d:0990", "0e8d:1887"])
         self.assertEqual(self.text(ed, "046d:0990"),
-                         "Camera  (046d:0990, high speed): used by Windows")
+                         "Logitech QuickCam Pro 9000 (camera, audio)  (046d:0990, high speed): "
+                         "used by Windows")
         self.assertEqual(self.text(ed, "0e8d:1887"),
-                         "MT1887  (0e8d:1887, high speed): given to QEMU")
+                         "MediaTek MT1887  (0e8d:1887, high speed): given to QEMU")
         self.assertFalse(any(w.winfo_class() == "TButton"
                              for w in ed.usb_host_list.winfo_children()))
 
@@ -435,7 +436,8 @@ class WindowsMainWindowCommandLine(unittest.TestCase):
         text = self.preview(w)
         self.assertIn("vendorid=0x0e8d,productid=0x1887", text)
         self.assertNotIn("vendorid=0x046d,productid=0x0990", text)
-        self.assertIn("while Windows uses them (USB devices… > Give to QEMU): 046d:0990", text)
+        self.assertIn("while Windows uses them (USB devices… > Give to QEMU): "
+                      "Logitech QuickCam Pro 9000 (046d:0990)", text)
 
     def test_missing_helper_passes_nothing(self):
         self.listing = ([], wl.missing_message())

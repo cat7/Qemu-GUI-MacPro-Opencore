@@ -97,7 +97,8 @@ def usb_owned(m: Machine) -> tuple[set | None, str]:
     if not paths.is_windows(paths.HOST_PLATFORM) or not m.usb_host_devices:
         return None, ""
     owned, why = winusb.owned_ids()
-    return owned, winusb.passthrough_note([u.id for u in m.usb_host_devices], owned, why)
+    return owned, winusb.passthrough_note([u.id for u in m.usb_host_devices], owned, why,
+                                          {u.id: u.name for u in m.usb_host_devices})
 
 
 def start_machine(m: Machine, machine_dir: Path, key_file: str | None = None) -> RunningMachine:

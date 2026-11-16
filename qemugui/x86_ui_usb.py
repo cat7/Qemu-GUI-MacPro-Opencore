@@ -86,7 +86,7 @@ class UsbDevicesDialog(tk.Toplevel):
             r += 1
         for dev_id in shown:
             d = plugged[dev_id]
-            text = f"{d.label}  ({dev_id}, {d.speed or '?'} speed): {d.state}"
+            text = f"{d.display}  ({dev_id}, {d.speed or '?'} speed): {d.state}"
             if d.refuse:
                 text += f"; cannot be given to QEMU ({d.refuse})"
             row = ttk.Label(self.list, text=text)
