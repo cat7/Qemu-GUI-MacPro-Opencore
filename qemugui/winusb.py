@@ -16,6 +16,7 @@ import json
 import re
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -290,7 +291,7 @@ def run_elevated(op: str, dev_id: str, folder: Path | str | None = None) -> dict
     exe = helper_path(folder)
     if not exe.is_file():
         return {"op": op, "id": dev_id, "ok": False, "error": missing_message()}
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         out = Path(td) / "result.json"
         try:
             code = shell_execute_runas(str(exe), f'{op} {dev_id} --out "{out}"')
@@ -298,13 +299,43 @@ def run_elevated(op: str, dev_id: str, folder: Path | str | None = None) -> dict
             return {"op": op, "id": dev_id, "ok": False, "error": str(e)}
         if code is None:
             return {"op": op, "id": dev_id, "ok": False, "cancelled": True}
-        try:
-            res = parse_result(out.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            res = {"op": op, "id": dev_id, "ok": False,
-                   "error": f"{HELPER} gave no result (exit code {code})"}
+        res, why = _read_result(out)
+    if res is None:
+        res = _result_from_state(op, dev_id, folder, code, why)
     res["exit"] = code
     return res
+
+
+READ_TRIES, READ_PAUSE = 15, 0.2
+
+
+def _read_result(out: Path, tries: int | None = None, pause: float | None = None) -> tuple[dict | None, str]:
+    """The result file, retried a while: a virus scanner may still hold
+    the file just written."""
+    why = ""
+    tries = tries or READ_TRIES
+    pause = READ_PAUSE if pause is None else pause
+    for i in range(tries):
+        try:
+            return parse_result(out.read_text(encoding="utf-8-sig")), ""
+        except (OSError, ValueError) as e:
+            why = f"{type(e).__name__}: {e}"
+        if i + 1 < tries:
+            time.sleep(pause)
+    return None, why
+
+
+def _result_from_state(op: str, dev_id: str, folder, code: int, why: str) -> dict:
+    """No result file: what the device's driver now is decides."""
+    try:
+        devices, problem = list_devices(folder)
+    except ValueError as e:         # off Windows: no creationflags
+        devices, problem = [], str(e)
+    d = next((x for x in devices if x.id == dev_id), None)
+    if not problem and d is not None and d.winusb == (op == "bind"):
+        return {"op": op, "id": dev_id, "ok": True, "status": "done", "unreported": why}
+    return {"op": op, "id": dev_id, "ok": False,
+            "error": f"{HELPER} left no report (exit code {code}; {why})"}
 
 
 def outcome_text(res: dict) -> str:

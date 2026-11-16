@@ -144,6 +144,8 @@ class Helper(unittest.TestCase):
         self.td = tempfile.TemporaryDirectory()
         paths.use_install_dir(self.td.name)
         self.saved = (wl.shell_execute_runas, wl.subprocess.run)
+        self.addCleanup(setattr, wl, "READ_PAUSE", wl.READ_PAUSE)
+        wl.READ_PAUSE = 0
         self.calls = []
 
     def tearDown(self):
@@ -225,6 +227,33 @@ class Helper(unittest.TestCase):
         res = wl.run_elevated("bind", "zz")
         self.assertFalse(res["ok"])
         self.assertIn("exit code 2", res["error"])
+
+    def test_no_result_file_but_the_device_moved_is_success(self):
+        self.install()
+        saved = wl.list_devices
+        try:
+            wl.shell_execute_runas = lambda exe, params: 0
+            wl.list_devices = lambda folder=None: (wl.parse_list(LIST), "")
+            res = wl.run_elevated("bind", "0e8d:1887")      # on WinUSB in LIST
+            self.assertTrue(res["ok"])
+            self.assertEqual(wl.outcome_text(res),
+                             "Given to QEMU: machines can now pass it through.")
+            res = wl.run_elevated("bind", "046d:0990")      # still Windows'
+            self.assertFalse(res["ok"])
+            self.assertIn("left no report (exit code 0;", res["error"])
+        finally:
+            wl.list_devices = saved
+
+    def test_a_result_file_with_a_bom_is_read(self):
+        self.install()
+
+        def runas(exe, params):
+            out = re.search(r'--out "([^"]+)"', params).group(1)
+            Path(out).write_bytes(b"\xef\xbb\xbf" + json.dumps(
+                {"op": "bind", "id": "046d:0990", "ok": True, "status": "done"}).encode())
+            return 0
+        wl.shell_execute_runas = runas
+        self.assertTrue(wl.run_elevated("bind", "046d:0990")["ok"])
 
 
 def _tk_available():
