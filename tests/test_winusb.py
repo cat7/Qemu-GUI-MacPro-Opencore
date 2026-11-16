@@ -244,6 +244,20 @@ class Helper(unittest.TestCase):
         finally:
             wl.list_devices = saved
 
+    def test_the_result_folder_is_not_tempfiles_and_is_removed(self):
+        self.install()
+        seen = []
+
+        def runas(exe, params):
+            out = Path(re.search(r'--out "([^"]+)"', params).group(1))
+            seen.append(out.parent)
+            self.assertTrue(out.parent.name.startswith("winusb-switch-"))
+            out.write_text(json.dumps({"op": "bind", "id": "046d:0990", "ok": True}) + "\n")
+            return 0
+        wl.shell_execute_runas = runas
+        self.assertTrue(wl.run_elevated("bind", "046d:0990")["ok"])
+        self.assertFalse(seen[0].exists())
+
     def test_a_result_file_with_a_bom_is_read(self):
         self.install()
 
@@ -262,6 +276,17 @@ def _tk_available():
         r = tkinter.Tk(); r.withdraw(); r.destroy(); return True
     except Exception:
         return False
+
+
+def MachineEditorFor(test, m):
+    import tkinter as tk
+    from qemugui.x86_ui_machine import MachineEditor
+    root = tk.Tk()
+    root.withdraw()
+    test.roots.append(root)
+    ed = MachineEditor(root, m, model.Library(test.td.name), "/q", on_save=lambda *a: None)
+    ed.withdraw()
+    return ed
 
 
 @unittest.skipUnless(_tk_available(), "no display")
@@ -307,10 +332,7 @@ class WindowsEditorTab(unittest.TestCase):
 
     def test_rows_state_speed_and_hidden_refusals(self):
         ed = self.editor(Machine(name="t"))
-        self.assertEqual(list(ed.usb_host_vars), ["046d:0990", "0e8d:1887"])
-        self.assertEqual(self.text(ed, "046d:0990"),
-                         "Logitech QuickCam Pro 9000 (camera, audio)  (046d:0990, high speed): "
-                         "used by Windows")
+        self.assertEqual(list(ed.usb_host_vars), ["0e8d:1887"])      # only QEMU's
         self.assertEqual(self.text(ed, "0e8d:1887"),
                          "MediaTek MT1887  (0e8d:1887, high speed): given to QEMU")
         self.assertFalse(any(w.winfo_class() == "TButton"
@@ -340,12 +362,34 @@ class WindowsEditorTab(unittest.TestCase):
 
     def test_tick_only_what_qemu_owns(self):
         ed = self.editor(Machine(name="t"))
-        self.assertIn("disabled", ed.usb_host_boxes["046d:0990"].state())     # Windows'
+        self.assertNotIn("046d:0990", ed.usb_host_boxes)                      # Windows'
         self.assertNotIn("disabled", ed.usb_host_boxes["0e8d:1887"].state())  # on WinUSB
         ed.usb_host_vars["0e8d:1887"].set(True)
         self.assertEqual(ed.usb_host_notes["0e8d:1887"].cget("text"), "")
         self.assertEqual(ed.collect().usb_host_devices,
                          [UsbHostDevice("0e8d:1887", "MT1887", "high")])
+
+    def test_one_machine_per_device(self):
+        lib = model.Library(self.td.name)
+        lib.save(Machine(name="other", usb_host_devices=[
+            UsbHostDevice("0e8d:1887", "MT1887", "high")]))
+        ed = self.editor(Machine(name="t"))
+        self.assertIn("passed through by “other”", self.text(ed, "0e8d:1887"))
+        self.assertIn("disabled", ed.usb_host_boxes["0e8d:1887"].state())
+        self.assertFalse(ed.usb_host_vars["0e8d:1887"].get())
+        # the owner itself keeps it
+        own = MachineEditorFor(self, lib.load("other"))
+        self.assertNotIn("disabled", own.usb_host_boxes["0e8d:1887"].state())
+        self.assertTrue(own.usb_host_vars["0e8d:1887"].get())
+
+    def test_conflicts_block_start_and_duplicates_start_empty(self):
+        lib = model.Library(self.td.name)
+        dev = [UsbHostDevice("0e8d:1887", "MT1887", "high")]
+        lib.save(Machine(name="a", usb_host_devices=dev))
+        lib.save(Machine(name="b", usb_host_devices=dev))
+        self.assertIn("also passed through by “b”", lib.usb_conflicts(lib.load("a"))[0])
+        self.assertEqual(lib.duplicate("a", "c").usb_host_devices, [])
+        self.assertEqual(lib.load("c").usb_host_devices, [])
 
     def test_saved_tick_kept_while_windows_owns_it(self):
         ed = self.editor(Machine(name="t", usb_host_devices=[

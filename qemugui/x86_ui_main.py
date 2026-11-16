@@ -513,6 +513,7 @@ class MainWindow(tk.Tk):
             return None
         errors, _warnings = model.validate(m, qemu_dir(), machine_dir=str(self.library.folder(m.name)))
         errors += model.start_blockers(m, self.key_file(), qemu_dir())
+        errors += self.library.usb_conflicts(m)
         if errors:
             messagebox.showerror("Start", "\n".join(f"• {e}" for e in errors))
             return None

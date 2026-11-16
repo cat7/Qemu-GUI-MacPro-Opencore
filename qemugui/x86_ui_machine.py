@@ -474,7 +474,8 @@ class MachineEditor(tk.Toplevel):
         ttk.Label(f, text="Host USB devices this Mac takes while it runs. With any device "
                           "ticked the machine starts with sudo and asks for your password. "
                           "High-speed devices go on a USB 2.0 controller added to the machine, "
-                          "others on the USB 1.1 controller.",
+                          "others on the USB 1.1 controller. Each device goes to one machine "
+                          "only.",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
             row=4, column=0, sticky="ew", pady=(0, 6))
         self.usb_host_list = ttk.Frame(f)
@@ -482,6 +483,20 @@ class MachineEditor(tk.Toplevel):
         self.usb_host_vars: dict[str, tk.BooleanVar] = {}
         self.usb_host_info: dict[str, UsbHostDevice] = {}
         self.usb_host_boxes: dict[str, ttk.Checkbutton] = {}
+
+    def _usb_claims(self) -> dict[str, str]:
+        """Device id -> the other machine that passes it through."""
+        claims: dict[str, str] = {}
+        try:
+            others = self.library.load_all()
+        except (OSError, ValueError):
+            return claims
+        for m in others:
+            if m.name == self.old_name:
+                continue
+            for u in m.usb_host_devices:
+                claims.setdefault(u.id, m.name)
+        return claims
 
     def _fill_usb_host(self, chosen: list[UsbHostDevice]):
         if self._usb_win:
@@ -496,6 +511,7 @@ class MachineEditor(tk.Toplevel):
         self.usb_host_vars = {}
         self.usb_host_info = {}
         self.usb_host_boxes = {}
+        claims = self._usb_claims()
         hidden = [i for i, d in plugged.items() if not d.passable]
         rows = [i for i in plugged if i not in hidden] + \
                [i for i in picked if i not in plugged]
@@ -521,10 +537,13 @@ class MachineEditor(tk.Toplevel):
                 text = (f"{usbnames.describe(dev_id, info.name)}  ({dev_id}, "
                         f"{info.speed or '?'} speed) -- not connected")
             refused = d is not None and not d.passable
+            taken = claims.get(dev_id) if dev_id not in picked else None
+            if taken:
+                text += f" -- passed through by “{taken}”"
             var = tk.BooleanVar(value=dev_id in picked and not refused)
             box = ttk.Checkbutton(self.usb_host_list, text=text, variable=var)
             box.grid(row=r, column=0, sticky="w")
-            if refused:
+            if refused or taken:
                 box.state(["disabled"])
             self.usb_host_vars[dev_id] = var
             self.usb_host_info[dev_id] = info
@@ -539,9 +558,9 @@ class MachineEditor(tk.Toplevel):
     def _build_usb_host_win(self, f):
         ttk.Separator(f).grid(row=3, column=0, sticky="ew", pady=10)
         f.rowconfigure(5, weight=1)
-        ttk.Label(f, text="Devices of this computer the machine passes through. Only a device "
-                          "given to QEMU can be ticked; USB devices… in the main window gives "
-                          "devices to QEMU.",
+        ttk.Label(f, text="Devices of this computer the machine passes through. Listed are "
+                          "the devices given to QEMU (USB devices… in the main window); each "
+                          "goes to one machine only.",
                   foreground=GREY, wraplength=EDITOR_WIDTH - 60, justify="left").grid(
             row=4, column=0, sticky="ew", pady=(0, 6))
         self.usb_host_list = ttk.Frame(f)
@@ -572,13 +591,14 @@ class MachineEditor(tk.Toplevel):
         self.usb_host_info = {}
         self.usb_host_boxes = {}
         self.usb_host_notes = {}
-        hidden = [i for i, d in plugged.items() if d.refuse and not d.winusb]
-        rows = [i for i in plugged if i not in hidden] + \
+        claims = self._usb_claims()
+        # Only devices given to QEMU, and this machine's own picks
+        rows = [i for i, d in plugged.items() if d.winusb or i in picked] + \
                [i for i in picked if i not in plugged]
         if problem:
             ttk.Label(lst, text=problem, foreground=GREY).grid(row=0, column=0, sticky="w")
         elif not rows:
-            ttk.Label(lst, text="No USB device is plugged in.",
+            ttk.Label(lst, text="No device is given to QEMU yet.",
                       foreground=GREY).grid(row=0, column=0, sticky="w")
         for n, dev_id in enumerate(rows):
             r = 1 + 2 * n
@@ -595,13 +615,16 @@ class MachineEditor(tk.Toplevel):
                 text = (f"{usbnames.describe(dev_id, info.name)}  ({dev_id}, "
                         f"{info.speed or '?'} speed): not plugged in")
             refused = d is not None and bool(d.refuse)
+            taken = claims.get(dev_id) if dev_id not in picked else None
+            if taken:
+                text += f"; passed through by “{taken}”"
             # A saved tick stays even while Windows uses the device
             var = tk.BooleanVar(value=dev_id in picked and not refused)
             box = ttk.Checkbutton(lst, text=text, variable=var)
             box.grid(row=r, column=0, sticky="w")
             note = ttk.Label(lst, text="", foreground=GREY)
             note.grid(row=r + 1, column=0, sticky="w")
-            if refused or (d is not None and not d.winusb):
+            if refused or taken or (d is not None and not d.winusb):
                 box.state(["disabled"])
             self.usb_host_vars[dev_id] = var
             self.usb_host_info[dev_id] = info

@@ -13,7 +13,9 @@ No Tk in here.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -291,8 +293,9 @@ def run_elevated(op: str, dev_id: str, folder: Path | str | None = None) -> dict
     exe = helper_path(folder)
     if not exe.is_file():
         return {"op": op, "id": dev_id, "ok": False, "error": missing_message()}
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-        out = Path(td) / "result.json"
+    td = result_dir()
+    try:
+        out = td / "result.json"
         try:
             code = shell_execute_runas(str(exe), f'{op} {dev_id} --out "{out}"')
         except OSError as e:
@@ -300,13 +303,31 @@ def run_elevated(op: str, dev_id: str, folder: Path | str | None = None) -> dict
         if code is None:
             return {"op": op, "id": dev_id, "ok": False, "cancelled": True}
         res, why = _read_result(out)
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
     if res is None:
         res = _result_from_state(op, dev_id, folder, code, why)
     res["exit"] = code
     return res
 
 
-READ_TRIES, READ_PAUSE = 15, 0.2
+def result_dir() -> Path:
+    """A folder for the elevated helper's result. Not tempfile's: since
+    Python 3.13 that one grants only SYSTEM, Administrators and the owner,
+    and a file the elevated helper writes is owned by Administrators, which
+    this unelevated program is then refused."""
+    base = Path(tempfile.gettempdir())
+    for _ in range(100):
+        d = base / f"winusb-switch-{os.getpid()}-{os.urandom(4).hex()}"
+        try:
+            os.mkdir(d)         # default mode: the ACL is inherited from TEMP
+            return d
+        except FileExistsError:
+            continue
+    raise OSError("no folder for the winusb-switch result")
+
+
+READ_TRIES, READ_PAUSE = 5, 0.1
 
 
 def _read_result(out: Path, tries: int | None = None, pause: float | None = None) -> tuple[dict | None, str]:
