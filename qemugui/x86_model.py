@@ -54,14 +54,16 @@ RTC_BASE_CHOICES = ("", "localtime")
 
 MAC_MODELS = ("MacPro1,1", "MacPro2,1", "MacPro3,1")
 MAC_MODEL_DEFAULT = "MacPro2,1"
-OS_VERSIONS = ("10.5", "10.6", "10.7", "10.8")
+OS_VERSIONS = ("10.5", "10.6", "10.7", "10.8", "10.9")
 OS_DEFAULT = "10.5"
 OS_NAMES = {"10.5": "Leopard", "10.6": "Snow Leopard", "10.7": "Lion",
-            "10.8": "Mountain Lion"}
+            "10.8": "Mountain Lion", "10.9": "Mavericks"}
 # the OpenCore Kernel->Scheme->KernelArch of each system
-OS_KERNEL_ARCH = {"10.5": "i386", "10.6": "i386", "10.7": "i386", "10.8": "x86_64"}
+OS_KERNEL_ARCH = {"10.5": "i386", "10.6": "i386", "10.7": "i386", "10.8": "x86_64",
+                  "10.9": "x86_64"}
 # the OpenCore Kernel->Scheme->KernelCache of each system
-OS_KERNEL_CACHE = {"10.5": "Mkext", "10.6": "Mkext", "10.7": "Mkext", "10.8": "Auto"}
+OS_KERNEL_CACHE = {"10.5": "Mkext", "10.6": "Mkext", "10.7": "Mkext", "10.8": "Auto",
+                   "10.9": "Auto"}
 
 
 def os_label(version: str) -> str:
@@ -74,8 +76,8 @@ def os_by_label(label: str) -> str:
 
 
 OS_LABELS = tuple(os_label(v) for v in OS_VERSIONS)
-# 10.8 has a 64-bit kernel only and runs on no earlier Mac Pro
-OS_MAC_MODELS = {"10.8": ("MacPro3,1",)}
+# 10.8 and 10.9 have a 64-bit kernel only and run on no earlier Mac Pro
+OS_MAC_MODELS = {"10.8": ("MacPro3,1",), "10.9": ("MacPro3,1",)}
 # the most processors each model shipped with
 MAC_MODEL_MAX_SMP = {"MacPro1,1": 4, "MacPro2,1": 8, "MacPro3,1": 8}
 
@@ -145,7 +147,7 @@ GPUS = tuple(GPU_LABELS)
 # the firmware driver's file of each card
 GPU_ROMS = {GPU_X1900: paths.R580_ROM_NAME, GPU_HD5770: paths.HD5770_ROM_NAME}
 # the systems with a driver for each card
-GPU_OS = {GPU_X1900: ("10.5", "10.6", "10.7"), GPU_HD5770: ("10.6", "10.7", "10.8")}
+GPU_OS = {GPU_X1900: ("10.5", "10.6", "10.7"), GPU_HD5770: ("10.6", "10.7", "10.8", "10.9")}
 GPU_DEFAULT = GPU_STD
 # the only mode the cards' firmware drivers offer
 GPU_X1900_RESOLUTION = "1024x768"

@@ -668,6 +668,20 @@ class Record(unittest.TestCase):
         errors, _ = model.validate(m, None, "darwin", check_files=False)
         self.assertFalse(any("10.8" in e for e in errors))
 
+    def test_mavericks_is_64_bit_on_the_2008_mac_pro(self):
+        m = model.new_machine("t")
+        m.os = "10.9"
+        self.assertEqual((m.kernel_arch, m.kernel_cache), ("x86_64", "Auto"))
+        errors, _ = model.validate(m, None, "darwin", check_files=False)
+        self.assertTrue(any("10.9" in e for e in errors))
+        m.mac_model = "MacPro3,1"
+        m.gpu = model.GPU_X1900
+        _, warnings = model.validate(m, None, "darwin", check_files=False)
+        self.assertTrue(any("10.9" in w for w in warnings))
+        m.gpu = model.GPU_HD5770
+        errors, warnings = model.validate(m, None, "darwin", check_files=False)
+        self.assertFalse(any("10.9" in e for e in errors + warnings))
+
     def test_the_2006_mac_pro_has_four_processors(self):
         def errs(**kw):
             e, _ = model.validate(plain(**kw), None, "darwin", check_files=False)
