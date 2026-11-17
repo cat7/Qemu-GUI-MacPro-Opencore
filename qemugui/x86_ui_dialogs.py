@@ -18,7 +18,7 @@ from . import paths
 from . import optical
 
 APP_NAME = paths.APP_NAME
-DISK_SIZES = ("1", "2", "4", "8", "10", "20")
+DISK_SIZES = ("1", "2", "4", "8", "10", "20", "40", "60")
 
 
 def refresh_native_style(widget: tk.Misc) -> None:
