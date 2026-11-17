@@ -52,7 +52,12 @@ VNC_RE = re.compile(r"^([A-Za-z0-9.\-]*:)?\d+$")
 RTC_BASE_RE = re.compile(r"^(utc|localtime|\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?)$")
 RTC_BASE_CHOICES = ("", "localtime")
 
-MAC_MODELS = ("MacPro1,1", "MacPro2,1", "MacPro3,1")
+MAC_MODELS = ("MacPro1,1", "MacPro2,1", "MacPro3,1", "MacPro4,1", "MacPro5,1")
+# the QEMU processor of each model; Penryn stands in for the Core 2 Xeons of 1,1 and 2,1
+MAC_MODEL_CPU = {"MacPro1,1": "Penryn", "MacPro2,1": "Penryn", "MacPro3,1": "Penryn",
+                 "MacPro4,1": "Nehalem", "MacPro5,1": "Westmere"}
+# the first system each later model shipped with
+MAC_MODEL_FIRST_OS = {"MacPro4,1": "10.5.6", "MacPro5,1": "10.6.4"}
 MAC_MODEL_DEFAULT = "MacPro2,1"
 OS_VERSIONS = ("10.5", "10.6", "10.7", "10.8", "10.9")
 OS_DEFAULT = "10.5"
@@ -76,10 +81,14 @@ def os_by_label(label: str) -> str:
 
 
 OS_LABELS = tuple(os_label(v) for v in OS_VERSIONS)
-# 10.8 and 10.9 have a 64-bit kernel only and run on no earlier Mac Pro
-OS_MAC_MODELS = {"10.8": ("MacPro3,1",), "10.9": ("MacPro3,1",)}
+# 10.8 and 10.9 have a 64-bit kernel only and run on no Mac Pro before 3,1;
+# 10.5 runs on no Mac Pro after 4,1
+OS_MAC_MODELS = {"10.5": ("MacPro1,1", "MacPro2,1", "MacPro3,1", "MacPro4,1"),
+                 "10.8": ("MacPro3,1", "MacPro4,1", "MacPro5,1"),
+                 "10.9": ("MacPro3,1", "MacPro4,1", "MacPro5,1")}
 # the most processors each model shipped with
-MAC_MODEL_MAX_SMP = {"MacPro1,1": 4, "MacPro2,1": 8, "MacPro3,1": 8}
+MAC_MODEL_MAX_SMP = {"MacPro1,1": 4, "MacPro2,1": 8, "MacPro3,1": 8, "MacPro4,1": 8,
+                     "MacPro5,1": 8}
 
 # SATA ports 1 to 5; port 0 is the generated OpenCore boot disk
 DRIVE_SLOTS = tuple(f"SATA port {n}" for n in range(1, 6))
@@ -121,7 +130,8 @@ def smp_option(n: int) -> str:
 SMP_DEFAULT = 1
 RAM_SIZES = (1024, 2048, 3072, 4096, 6144, 8192, 12288, 16384, 24576, 32768)
 # the most memory Apple lists for each model
-MAC_MODEL_MAX_RAM = {"MacPro1,1": 16384, "MacPro2,1": 16384, "MacPro3,1": 32768}
+MAC_MODEL_MAX_RAM = {"MacPro1,1": 16384, "MacPro2,1": 16384, "MacPro3,1": 32768,
+                     "MacPro4,1": 32768, "MacPro5,1": 32768}
 RAM_CHOICES = RAM_SIZES
 
 
@@ -605,6 +615,9 @@ def validate(m: Machine, qemu_dir: str | None = None, platform: str = paths.HOST
     if m.os == "10.5" and m.mac_model == "MacPro3,1":
         warnings.append("A MacPro3,1 needs a Mac OS X 10.5.1 or later install disc; "
                         "the original 10.5.0 disc is not meant for it.")
+    first = MAC_MODEL_FIRST_OS.get(m.mac_model)
+    if first and m.os in OS_VERSIONS and first.startswith(m.os + "."):
+        warnings.append(f"A {m.mac_model} needs a Mac OS X {first} or later install disc.")
     if m.accel not in ("tcg", "hvf", "whpx"):
         errors.append(f"'{m.accel}' is not an acceleration setting.")
     elif m.accel not in accel_choices(platform):

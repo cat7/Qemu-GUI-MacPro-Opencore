@@ -708,6 +708,25 @@ class Record(unittest.TestCase):
         self.assertTrue(noted(os="10.5", mac_model="MacPro3,1"))
         self.assertFalse(noted(os="10.5", mac_model="MacPro2,1"))
 
+    def test_the_2009_and_2010_mac_pros(self):
+        def check(**kw):
+            return model.validate(plain(**kw), None, "darwin", check_files=False)
+        cpu = lambda mm: option(argv_of(plain(mac_model=mm), "win32", WQD, WMD), "-cpu")
+        self.assertEqual(cpu("MacPro4,1"), ["Nehalem,vendor=GenuineIntel"])
+        self.assertEqual(cpu("MacPro5,1"), ["Westmere,vendor=GenuineIntel"])
+        self.assertEqual(cpu("MacPro2,1"), ["Penryn,vendor=GenuineIntel"])
+        e, w = check(os="10.5", mac_model="MacPro4,1")
+        self.assertFalse(e)
+        self.assertTrue(any("10.5.6" in x for x in w))
+        e, _ = check(os="10.5", mac_model="MacPro5,1")
+        self.assertTrue(any("10.5" in x for x in e))
+        e, w = check(os="10.6", mac_model="MacPro5,1")
+        self.assertFalse(e)
+        self.assertTrue(any("10.6.4" in x for x in w))
+        e, w = check(os="10.9", mac_model="MacPro5,1", gpu=model.GPU_HD5770, ram_mb=32768)
+        self.assertFalse(e)
+        self.assertFalse(any("needs" in x for x in w))
+
 
 class Validation(unittest.TestCase):
 
