@@ -24,6 +24,8 @@ HEADER_NOTE = f"Written by {paths.APP_NAME}. Do not edit."
 PC_BIOS_DIR = paths.PC_BIOS_DIR_NAME
 MACHINE_TYPE = "q35,i8042=off"
 CPU_VENDOR = ",vendor=GenuineIntel"
+# no hypervisor gives a guest this Westmere flag
+CPU_NO_ARAT = ",arat=off"
 # given only under TCG on a Mac host
 TCG_TSC_FREQUENCY = 1200000000
 TCG_ACCEL = "tcg,thread=multi,tb-size=512"
@@ -90,7 +92,10 @@ def accel_tokens(m: Machine) -> list[str]:
 
 def cpu_option(m: Machine, platform: str) -> str:
     tsc = f",tsc-frequency={TCG_TSC_FREQUENCY}" if platform == "darwin" and m.accel == "tcg" else ""
-    return model.MAC_MODEL_CPU.get(m.mac_model, "Penryn") + CPU_VENDOR + tsc
+    cpu = model.MAC_MODEL_CPU.get(m.mac_model, "Penryn")
+    name = model.MAC_MODEL_CPU_NAME.get(m.mac_model)
+    return (cpu + CPU_VENDOR + (f",model-id={name}" if name else "")
+            + (CPU_NO_ARAT if cpu == "Westmere" else "") + tsc)
 
 
 def drive_tokens(m: Machine, machine_dir: str, platform: str) -> list[str]:

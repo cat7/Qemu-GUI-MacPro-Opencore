@@ -56,6 +56,12 @@ MAC_MODELS = ("MacPro1,1", "MacPro2,1", "MacPro3,1", "MacPro4,1", "MacPro5,1")
 # the QEMU processor of each model; Penryn stands in for the Core 2 Xeons of 1,1 and 2,1
 MAC_MODEL_CPU = {"MacPro1,1": "Penryn", "MacPro2,1": "Penryn", "MacPro3,1": "Penryn",
                  "MacPro4,1": "Nehalem", "MacPro5,1": "Westmere"}
+# the name of a Xeon each model shipped with
+MAC_MODEL_CPU_NAME = {"MacPro1,1": "Intel(R) Xeon(R) CPU 5150 @ 2.66GHz",
+                      "MacPro2,1": "Intel(R) Xeon(R) CPU X5365 @ 3.00GHz",
+                      "MacPro3,1": "Intel(R) Xeon(R) CPU E5462 @ 2.80GHz",
+                      "MacPro4,1": "Intel(R) Xeon(R) CPU E5520 @ 2.27GHz",
+                      "MacPro5,1": "Intel(R) Xeon(R) CPU X5670 @ 2.93GHz"}
 # the first system each later model shipped with
 MAC_MODEL_FIRST_OS = {"MacPro4,1": "10.5.6", "MacPro5,1": "10.6.4"}
 MAC_MODEL_DEFAULT = "MacPro2,1"

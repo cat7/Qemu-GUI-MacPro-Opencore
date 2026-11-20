@@ -62,7 +62,7 @@ MAC_ARGV = [
     "-m", "2048", "-smp", "1",
     "-global", "ICH9-LPC.disable_s3=1", "-global", "ICH9-LPC.disable_s4=1",
     "-global", "mc146818rtc.ext-ram=on",
-    "-cpu", "Penryn,vendor=GenuineIntel,tsc-frequency=1200000000",
+    "-cpu", "Penryn,vendor=GenuineIntel,model-id=Intel(R) Xeon(R) CPU X5365 @ 3.00GHz,tsc-frequency=1200000000",
     "-drive", f"if=pflash,format=raw,readonly=on,file={QD}/pc-bios/edk2-x86_64-code.fd",
     "-drive", f"if=pflash,format=raw,file={MD}/OVMF_VARS.fd",
     "-smbios", "type=2",
@@ -97,7 +97,7 @@ OSK="$(cat '{KEY}')"
 -global ICH9-LPC.disable_s3=1 \\
 -global ICH9-LPC.disable_s4=1 \\
 -global mc146818rtc.ext-ram=on \\
--cpu Penryn,vendor=GenuineIntel,tsc-frequency=1200000000 \\
+-cpu 'Penryn,vendor=GenuineIntel,model-id=Intel(R) Xeon(R) CPU X5365 @ 3.00GHz,tsc-frequency=1200000000' \\
 -drive if=pflash,format=raw,readonly=on,file={QD}/pc-bios/edk2-x86_64-code.fd \\
 -drive if=pflash,format=raw,file={MD}/OVMF_VARS.fd \\
 -smbios type=2 \\
@@ -136,7 +136,7 @@ RUN_BAT = "\r\n".join([
     '-global ICH9-LPC.disable_s3=1 ^',
     '-global ICH9-LPC.disable_s4=1 ^',
     '-global mc146818rtc.ext-ram=on ^',
-    '-cpu "Penryn,vendor=GenuineIntel" ^',
+    '-cpu "Penryn,vendor=GenuineIntel,model-id=Intel(R) Xeon(R) CPU X5365 @ 3.00GHz" ^',
     rf'-drive "if=pflash,format=raw,readonly=on,file={WQD}\pc-bios\edk2-x86_64-code.fd" ^',
     rf'-drive "if=pflash,format=raw,file={WMD}\OVMF_VARS.fd" ^',
     "-smbios type=2 ^",
@@ -308,7 +308,7 @@ class Pieces(unittest.TestCase):
         self.assertNotIn(tsc, option(argv_of(plain(), "win32", WQD, WMD), "-cpu")[0])
         self.assertNotIn(tsc, option(argv_of(plain(), "linux"), "-cpu")[0])
         self.assertEqual(option(argv_of(plain(), "win32", WQD, WMD), "-cpu"),
-                         ["Penryn,vendor=GenuineIntel"])
+                         ["Penryn,vendor=GenuineIntel,model-id=Intel(R) Xeon(R) CPU X5365 @ 3.00GHz"])
 
     def test_smp_sockets(self):
         self.assertEqual([model.smp_option(n) for n in model.SMP_CHOICES],
@@ -729,9 +729,12 @@ class Record(unittest.TestCase):
         def check(**kw):
             return model.validate(plain(**kw), None, "darwin", check_files=False)
         cpu = lambda mm: option(argv_of(plain(mac_model=mm), "win32", WQD, WMD), "-cpu")
-        self.assertEqual(cpu("MacPro4,1"), ["Nehalem,vendor=GenuineIntel"])
-        self.assertEqual(cpu("MacPro5,1"), ["Westmere,vendor=GenuineIntel"])
-        self.assertEqual(cpu("MacPro2,1"), ["Penryn,vendor=GenuineIntel"])
+        self.assertEqual(cpu("MacPro4,1"), ["Nehalem,vendor=GenuineIntel"
+                                            ",model-id=Intel(R) Xeon(R) CPU E5520 @ 2.27GHz"])
+        self.assertEqual(cpu("MacPro5,1"), ["Westmere,vendor=GenuineIntel"
+                                            ",model-id=Intel(R) Xeon(R) CPU X5670 @ 2.93GHz,arat=off"])
+        self.assertEqual(cpu("MacPro2,1"), ["Penryn,vendor=GenuineIntel"
+                                            ",model-id=Intel(R) Xeon(R) CPU X5365 @ 3.00GHz"])
         e, w = check(os="10.5", mac_model="MacPro4,1")
         self.assertFalse(e)
         self.assertTrue(any("10.5.6" in x for x in w))
