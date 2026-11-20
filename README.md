@@ -1,8 +1,16 @@
 # Qemu-system-x86_64 OpenCore GUI
 
-A portable launcher for Intel Mac OS X 10.5 (Leopard, 32-bit kernel) on
+A portable launcher for Intel Mac OS X 10.5 Leopard to 10.10 Yosemite on
 `qemu-system-x86_64`: QEMU q35 with OVMF and OpenCore, presenting as a Mac
-Pro. Target QEMU: branch `x86-opencore` of github.com/cat7/qemu.
+Pro (MacPro1,1 to MacPro5,1). Target QEMU: branch `MacPro-opencore` of
+https://github.com/cat7/MacPro-opencore.
+
+## Download
+
+The launcher is not released on its own. It is part of the QEMU release,
+which holds QEMU, its firmware, OpenCore and this launcher, ready to run:
+
+https://github.com/cat7/MacPro-opencore/releases
 
 Machines are kept in a `Machines` folder beside the program, one folder
 each, as `machine.json`. `run.command` (macOS) or `run.bat` (Windows) is
@@ -29,7 +37,8 @@ The program sits in the folder that holds:
         Docs/Sample.plist
     Kexts/                         optional; every *.kext folder is injected
     OSK-Key.txt                    SMC key file (path is a setting)
-    ati-r580-gop.rom               optional; ROM of the ATI Radeon X1900 XT card
+    ati-hd5770-gop.rom             ROM of the ATI Radeon HD 5770 card
+    ati-r580-gop.rom               ROM of the ATI Radeon X1900 XT card
 
 The SMC key file is one line of exactly 64 printable characters. The key is
 read by the launcher each time it runs and is stored nowhere else.
