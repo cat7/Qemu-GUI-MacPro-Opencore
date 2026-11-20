@@ -33,8 +33,15 @@ HDA_SLOT = "0x1b"
 NETDEV_ID = "n0"
 SMC_VAR = "OSK"
 UHCI_BUS = "uhci.0"
-# Mac OS X 10.5 cuts 7.5% off each edge of an absolute axis
+# Mac OS X up to 10.9 cuts 7.5% off each edge of an absolute axis; 10.10 does not
 TABLET_INSET = 75
+TABLET_INSET_NONE = ("10.10",)
+
+
+def _tablet(os: str) -> str:
+    if os in TABLET_INSET_NONE:
+        return f"usb-tablet,bus={UHCI_BUS}"
+    return f"usb-tablet,bus={UHCI_BUS},axis-inset={TABLET_INSET}"
 
 
 def _path(p: str, base: str, platform: str) -> str:
@@ -162,7 +169,7 @@ def build_argv(m: Machine, qemu_dir: str, machine_dir: str,
 
     extra = split_extra_args(m.extra_args, platform)
     argv += ["-device", "piix3-usb-uhci,id=uhci", "-device", f"usb-kbd,bus={UHCI_BUS}",
-             "-device", (f"usb-tablet,bus={UHCI_BUS},axis-inset={TABLET_INSET}" if m.usb_tablet
+             "-device", (_tablet(m.os) if m.usb_tablet
                          else f"usb-mouse,bus={UHCI_BUS}")]
     if builtin_audio_added(m, extra):
         audio = paths.resolve_audio("default", platform)

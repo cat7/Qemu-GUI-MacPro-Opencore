@@ -324,6 +324,11 @@ class Pieces(unittest.TestCase):
         self.assertIn("usb-mouse,bus=uhci.0", devices)
         self.assertNotIn("usb-tablet,bus=uhci.0,axis-inset=75", devices)
 
+    def test_yosemite_takes_the_tablet_without_an_inset(self):
+        devices = option(argv_of(plain(os="10.10", mac_model="MacPro3,1")), "-device")
+        self.assertIn("usb-tablet,bus=uhci.0", devices)
+        self.assertNotIn("usb-tablet,bus=uhci.0,axis-inset=75", devices)
+
     def test_vnc(self):
         argv = argv_of(plain(vnc=":5"))
         self.assertEqual(option(argv, "-display"), ["none"])
